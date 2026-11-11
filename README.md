@@ -8,6 +8,7 @@ NetPulse pings your devices on a schedule, keeps every result in SQLite, and sho
 
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/HighSkai/NetPulse)](https://github.com/HighSkai/NetPulse/releases)
+[![CI](https://github.com/HighSkai/NetPulse/actions/workflows/ci.yml/badge.svg)](https://github.com/HighSkai/NetPulse/actions/workflows/ci.yml)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)
 ![Flask](https://img.shields.io/badge/Flask-3.1%2B-000000?logo=flask&logoColor=white)
 ![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D6?logo=windows&logoColor=white)
