@@ -1,0 +1,22 @@
+{# Re-reads itself every refresh_s (the scheduler's interval) to show the
+   results the background checks have stored. The poll URL carries the view's
+   search, filter and sort, so a refresh never undoes them (plan section 16).
+
+   oob=True: sent after another element (the add form) as an out-of-band swap.
+   HTMX parses responses inside a <template>; once a <form> has been seen, a bare
+   <tbody>/<tr> is dropped by the HTML parser. Wrapping it in its own <template>
+   keeps the table tags intact. #}
+{% if oob %}<template>{% endif %}
+<tbody id="device-rows"
+       hx-get="{{ url_for('netpulse.device_rows', **view.params) }}" hx-trigger="every {{ refresh_s }}s" hx-swap="outerHTML"
+       {%- if oob %} hx-swap-oob="true"{% endif %}>
+  {% for row in rows %}
+    {% include "_device_row.html" %}
+  {% else %}
+    <tr class="empty"><td colspan="7">
+      {%- if total %}No devices match. <a href="{{ url_for('netpulse.dashboard') }}">Show all {{ total }}</a>
+      {%- else %}No devices yet. Add one below.{% endif -%}
+    </td></tr>
+  {% endfor %}
+</tbody>
+{% if oob %}</template>{% endif %}

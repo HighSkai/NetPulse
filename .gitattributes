@@ -1,0 +1,10 @@
+# LF in the repository and in every checkout, whatever core.autocrlf says.
+* text=auto eol=lf
+
+# Vendored files are pinned by subresource-integrity hashes:
+# Git must never change a byte of them.
+src/netpulse/web/static/*.min.js -text
+src/netpulse/web/static/*.min.css -text
+
+# Bundled fonts, pinned by hash like the vendored scripts.
+*.woff2 binary

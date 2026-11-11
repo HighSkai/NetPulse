@@ -1,0 +1,32 @@
+{# Summary cards (plan section 16), on the overview since plan section 26: the
+   whole fleet, as bordered stat cells. Counts link to the device table filtered to them. #}
+<section id="summary" class="summary" aria-label="Summary">
+  <a class="stat" href="{{ url_for('netpulse.dashboard') }}">
+    <span class="stat-value">{{ summary.monitored }}</span>
+    <span class="stat-label">monitored</span>
+  </a>
+  <a class="stat stat-up" href="{{ url_for('netpulse.dashboard', status='up') }}">
+    <span class="stat-value"><span class="glyph" aria-hidden="true">●</span> {{ summary.up }}</span>
+    <span class="stat-label">up</span>
+  </a>
+  <a class="stat stat-degraded" href="{{ url_for('netpulse.dashboard', status='degraded') }}">
+    <span class="stat-value"><span class="glyph" aria-hidden="true">▲</span> {{ summary.degraded }}</span>
+    <span class="stat-label">degraded</span>
+  </a>
+  <a class="stat stat-down" href="{{ url_for('netpulse.dashboard', status='down') }}">
+    <span class="stat-value"><span class="glyph" aria-hidden="true">✕</span> {{ summary.down }}</span>
+    <span class="stat-label">down</span>
+  </a>
+  <a class="stat stat-unknown" href="{{ url_for('netpulse.dashboard', status='unchecked') }}">
+    <span class="stat-value"><span class="glyph" aria-hidden="true">○</span> {{ summary.unchecked }}</span>
+    <span class="stat-label">not checked</span>
+  </a>
+  <div class="stat">
+    <span class="stat-value">{{ summary.median_latency_ms|ms }}</span>
+    <span class="stat-label">median latency</span>
+  </div>
+  <div class="stat">
+    <span class="stat-value">{{ summary.availability|percent }}</span>
+    <span class="stat-label">checks up, 24 h</span>
+  </div>
+</section>

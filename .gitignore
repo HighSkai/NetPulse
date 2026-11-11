@@ -1,0 +1,57 @@
+# --- Python environments, caches and build output ---
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.ruff_cache/
+.mypy_cache/
+
+# --- Tests and test output: kept locally, not published ---
+tests/
+test/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.github/workflows/tests.yml
+
+# --- Runtime data: databases, upgrade backups and packet captures ---
+# NetPulse's database and its upgrade copies (netpulse.vN-backup-*.db) hold your
+# devices and their history. Captures hold whatever the packets carried.
+*.db
+*.db-wal
+*.db-shm
+*-captures/
+*.pcap
+*.pcapng
+
+# --- Logs, temporary files and crash dumps ---
+*.log
+*.tmp
+*.bak
+*.dmp
+
+# --- Secrets and local configuration ---
+.env
+.env.*
+*.pem
+*.key
+
+# --- Development notes and planning documents ---
+docs/decisions/
+docs/handoff.md
+
+# --- Editors, AI tooling and operating systems ---
+.idea/
+.vscode/
+*.code-workspace
+.claude/
+CLAUDE.md
+.DS_Store
+Thumbs.db
+desktop.ini

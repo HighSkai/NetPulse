@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="NetPulse">
+  <title>NetPulse</title>
+  <style>
+    svg { --logo-body: #dfe6ee; --logo-leg: #8792ff; --logo-joint: #7fd4f0; --logo-pulse: #48e8f8; }
+    @media (prefers-color-scheme: light) { svg { --logo-body: #0b0f16; --logo-leg: #4b55ff; --logo-joint: #0b6a85; --logo-pulse: #0b6a85; } }
+    .body { fill: none; stroke: var(--logo-body); }
+    .leg { fill: none; stroke: var(--logo-leg); }
+    .joint { fill: none; stroke: var(--logo-joint); }
+    .pulse { fill: none; stroke: var(--logo-pulse); }
+    .eye { fill: var(--logo-pulse); }
+  </style>
+  <!-- A hub with four legs, each bent once and ending at a node, and a fifth
+       leg drawn as a heartbeat: the pulse. Straight lines, mitred joints. -->
+  <g stroke-width="2.5" stroke-linejoin="miter" stroke-linecap="butt">
+    <polyline class="leg" points="27,27 18,18 18,10"/>
+    <polyline class="leg" points="27,37 18,46 10,46"/>
+    <polyline class="leg" points="37,27 46,18 54,18"/>
+    <polyline class="leg" points="37,37 46,46 46,54"/>
+    <polyline class="pulse" points="39,32 43,32 46,24 50,40 53,32 57,32"/>
+    <circle class="joint" cx="18" cy="7" r="3"/>
+    <circle class="joint" cx="7" cy="46" r="3"/>
+    <circle class="joint" cx="57" cy="18" r="3"/>
+    <circle class="joint" cx="46" cy="57" r="3"/>
+    <circle class="joint" cx="60" cy="32" r="3"/>
+    <circle class="body" cx="32" cy="32" r="7"/>
+    <circle class="eye" cx="32" cy="32" r="2.5"/>
+  </g>
+</svg>

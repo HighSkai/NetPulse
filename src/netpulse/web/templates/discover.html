@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% from "_macros.html" import error_summary, field_error, invalid, prompt %}
+{% set active_tab = "discover" %}
+
+{% block title %}Discover · NetPulse{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    {{ prompt("Discover", "discover") }}
+    <p class="dim">Find the devices on this PC's networks. Nothing is monitored until you accept it.</p>
+  </div>
+</div>
+
+{% for message in get_flashed_messages() %}
+  <p class="saved" role="status">{{ message }}</p>
+{% endfor %}
+{% if form.error and not targets %}{{ error_summary(form) }}{% endif %}
+
+{% if network_error %}
+<div class="notice" role="note">
+  <p><strong>Network settings unavailable:</strong> {{ network_error }}. NetPulse needs them to know which subnets it may sweep.
+    <a href="{{ url_for('netpulse.network') }}">Network</a></p>
+</div>
+{% elif not can_sweep %}
+<div class="notice" role="note"><p>This NetPulse was started without a way to sweep.</p></div>
+{% elif not targets %}
+<p class="dim">This PC has no private subnet to sweep. Sweeps cover only 10.x, 172.16–31.x and 192.168.x networks.</p>
+{% else %}
+{# Plan section 21: this PC's own private subnets only, at most 256 addresses. #}
+<form class="device-form sweep-form" method="post" action="{{ url_for('netpulse.start_sweep') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  {{ error_summary(form) }}
+  <label>Subnet
+    <select name="network" id="field-network"{{ invalid(form, "network") }}>
+      {% for target in targets %}
+      <option value="{{ target.network }}">{{ target.network }} · {{ target.adapter }}{% if target.needs_confirmation %} · Public{% endif %}</option>
+      {% endfor %}
+    </select>
+    {{ field_error(form, "network") }}
+  </label>
+  {% if targets|selectattr("needs_confirmation")|list %}
+  <div class="confirm">
+    <label><span><input type="checkbox" name="confirm" id="field-confirm" value="yes"{% if form.error_field == "confirm" %} aria-invalid="true" aria-describedby="error-confirm confirm-hint"{% else %} aria-describedby="confirm-hint"{% endif %}> This is a network I own or manage</span></label>
+    {{ field_error(form, "confirm") }}
+    <span class="hint" id="confirm-hint">Windows marks it as Public. Only sweep networks that are yours, never a café's or a hotel's.</span>
+  </div>
+  {% endif %}
+  <div class="form-actions">
+    <button type="submit" class="primary">Sweep</button>
+  </div>
+  <p class="hint">
+    Pings each address once, up to {{ workers }} at a time, then reads which devices Windows found,
+    so devices that ignore pings show up too. It takes a few seconds.
+  </p>
+</form>
+{% endif %}
+
+{% include "_discover_view.html" %}
+{% endblock %}

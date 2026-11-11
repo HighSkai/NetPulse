@@ -1,0 +1,31 @@
+{% from "_macros.html" import row_status %}
+{% set device = row.status.device %}
+{% set latest = row.status.latest %}
+{# flash: the row Check now just refreshed, highlighted briefly when motion is allowed (plan section 25).
+   Plan section 32: its links carry the table's view, so Back on the device page returns to it. #}
+{% set back = view.params if view is defined else {} %}
+<tr id="device-{{ device.id }}"{% if flash %} class="flash"{% endif %}>
+  <td><a class="name-cut" href="{{ url_for('netpulse.device_detail', device_id=device.id, **back) }}" title="{{ device.name }}">{{ device.name }}</a></td>
+  <td>{{ device.host }}</td>
+  <td>{{ row_status(row) }}</td>
+  <td class="num">{{ row.latency_ms|ms }}</td>
+  <td class="num">{{ row.availability|percent }}</td>
+  <td class="col-optional">{{ latest.checked_at|localtime if latest else "Never" }}</td>
+  <td class="actions">
+    <form method="post" action="{{ url_for('netpulse.check_device', device_id=device.id) }}"
+          hx-post="{{ url_for('netpulse.check_device', device_id=device.id) }}"
+          hx-target="closest tr" hx-swap="outerHTML" hx-include="#device-filter" hx-disabled-elt="find button">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit">Check now</button>
+    </form>
+    <a class="button" href="{{ url_for('netpulse.edit_device', device_id=device.id, **back) }}">Edit</a>
+    {# hx-include sends the table's view, so the refreshed rows keep it (plan section 16). #}
+    <form method="post" action="{{ url_for('netpulse.delete_device', device_id=device.id) }}"
+          hx-post="{{ url_for('netpulse.delete_device', device_id=device.id) }}"
+          hx-target="#device-rows" hx-swap="outerHTML" hx-include="#device-filter"
+          hx-confirm="Delete {{ device.name }}? Its check history is kept.">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="danger">Delete</button>
+    </form>
+  </td>
+</tr>

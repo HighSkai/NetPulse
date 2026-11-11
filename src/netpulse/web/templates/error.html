@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% from "_macros.html" import prompt %}
+
+{% block title %}{{ code }} {{ name }} · NetPulse{% endblock %}
+
+{# Plan section 32: refused requests, missing pages and faults on this PC get a
+   page in the app's look, never the framework's default. #}
+{% block content %}
+{{ prompt(code ~ " " ~ name, "error", target=code|string) }}
+<div class="error-page{% if code >= 500 %} error-fault{% endif %}">
+  <p><strong>{{ name }}.</strong> {{ message }}</p>
+  {%- if code >= 500 %}
+  <p class="hint">This is about this PC or NetPulse, not about your devices. Their history is unchanged.</p>
+  {%- endif %}
+  <p><a href="{{ url_for('netpulse.overview') }}">Back to the overview</a></p>
+</div>
+{% endblock %}

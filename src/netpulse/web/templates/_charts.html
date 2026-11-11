@@ -1,0 +1,100 @@
+{# Charts drawn on the server (plan section 26). netpulse.charts computes them
+   and escapes the text inside the SVG; these macros lay them out. Every chart
+   can be read as a table, under "Show data", as the device page's can (plan
+   section 17). #}
+
+{# A donut, its legend beside it, and its data. Each legend swatch uses the
+   slice's own pattern, so the legend pairs pattern, label, count and share. #}
+{% macro donut_chart(chart) -%}
+<figure class="donut-chart" aria-labelledby="{{ chart.id }}-caption">
+  <figcaption id="{{ chart.id }}-caption" class="chart-title">{{ chart.title }}</figcaption>
+  <div class="donut-body">
+    {{ chart.svg|safe }}
+    <ul class="donut-legend">
+      {%- for drawn in chart.slices %}
+      <li{% if not drawn.slice.count %} class="empty"{% endif %}>
+        <svg class="legend-swatch" viewBox="0 0 12 12" aria-hidden="true"><rect width="12" height="12" fill="url(#{{ chart.pattern_id(drawn) }})"/></svg>
+        <span class="legend-label">{{ drawn.slice.label }}</span>
+        <span class="num">{{ drawn.slice.count }}</span>
+        <span class="num legend-share">{{ drawn.percent if chart.total else "—" }}</span>
+      </li>
+      {%- endfor %}
+    </ul>
+  </div>
+  <details>
+    <summary>Show data</summary>
+    <table>
+      <caption class="visually-hidden">{{ chart.title }}</caption>
+      <thead><tr><th scope="col">{{ chart.title }}</th><th scope="col" class="num">{{ chart.unit|capitalize or "Count" }}</th><th scope="col" class="num">Share</th></tr></thead>
+      <tbody>
+        {%- for drawn in chart.slices %}
+        <tr><th scope="row">{{ drawn.slice.label }}</th><td class="num">{{ drawn.slice.count }}</td><td class="num">{{ drawn.percent if chart.total else "—" }}</td></tr>
+        {%- endfor %}
+      </tbody>
+    </table>
+  </details>
+</figure>
+{%- endmacro %}
+
+{# A top-N bar list. Each bar's length is its share of the longest. With
+   devices=True each label links to its device's page. #}
+{% macro bar_list(bars, title, empty, devices=True) -%}
+<figure class="bar-list" aria-labelledby="{{ title|lower|replace(' ', '-') }}-caption">
+  <figcaption id="{{ title|lower|replace(' ', '-') }}-caption" class="chart-title">{{ title }}</figcaption>
+  {%- if bars %}
+  <ol>
+    {%- for bar in bars %}
+    <li>
+      {%- if devices %}
+      <a href="{{ url_for('netpulse.device_detail', device_id=bar.key) }}" title="{{ bar.label }}">{{ bar.label }}</a>
+      {%- else %}
+      <span class="bar-label" title="{{ bar.label }}">{{ bar.label }}</span>
+      {%- endif %}
+      <span class="bar-track" aria-hidden="true"><span class="bar-fill" style="--share: {{ '%.1f'|format(bar.share) }}"></span></span>
+      <span class="num">{{ bar.text }}</span>
+    </li>
+    {%- endfor %}
+  </ol>
+  {%- else %}
+  <p class="hint">{{ empty }}</p>
+  {%- endif %}
+</figure>
+{%- endmacro %}
+
+{# The status grid: one row per device, one cell per hour, drawn like the
+   device page's availability bars (plan section 17). Each cell also says, in
+   words for screen readers, how many checks were up. #}
+{% macro status_grid(grid) -%}
+<div class="table-wrap status-grid-wrap">
+  <table class="status-grid">
+    <caption class="visually-hidden">Checks up per device, each hour of the last 24 h. Times are local.</caption>
+    <thead>
+      <tr>
+        <th scope="col">Device</th>
+        {%- for hour in grid.hours %}
+        <th scope="col" class="hour">{% if loop.index0 % 3 == 0 or loop.last %}{{ hour|hour }}{% else %}<span class="visually-hidden">{{ hour|hour }}</span>{% endif %}</th>
+        {%- endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {%- for row in grid.rows %}
+      <tr>
+        <th scope="row" title="{{ row.label }}"><a href="{{ url_for('netpulse.device_detail', device_id=row.key) }}">{{ row.label }}</a></th>
+        {%- for cell in row.cells %}
+        {%- set a = cell.availability %}
+        <td class="cell cell-{{ cell.state }}" title="{{ cell.hour|hour }}: {% if a.checks %}{{ a.successes }} of {{ a.checks }} checks up{% else %}no checks{% endif %}"><span class="visually-hidden">{% if a.checks %}{{ a.successes }} of {{ a.checks }} up{% else %}no data{% endif %}</span></td>
+        {%- endfor %}
+      </tr>
+      {%- else %}
+      <tr class="empty"><td colspan="{{ grid.hours|length + 1 }}">No devices yet.</td></tr>
+      {%- endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="legend">
+  <span class="swatch cell-up"></span>all up
+  <span class="swatch cell-partial"></span>some failed
+  <span class="swatch cell-down"></span>all failed
+  <span class="swatch cell-none"></span>no checks
+</p>
+{%- endmacro %}

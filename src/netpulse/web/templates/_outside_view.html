@@ -1,0 +1,76 @@
+{# The check from outside in progress, or the check shown (plan section 31).
+   While one runs this polls itself every second; when it ends, the page
+   reloads so the list of past checks has it. #}
+{% from "_charts.html" import donut_chart %}
+<div id="outside-view"{% if running %} hx-get="{{ url_for('netpulse.outside_view') }}" hx-trigger="every 1s" hx-swap="outerHTML"{% endif %}>
+{%- if running %}
+  <p class="sweep-status" role="status"><span class="glyph live-dot" aria-hidden="true">◉</span>
+    Asking Globalping's probes about {{ status.request.target }} from {{ status.request.where.label }}…</p>
+{%- endif %}
+{%- if check is not none and not running %}
+  {%- set r = check.request %}
+  <section aria-labelledby="outside-result-heading">
+    <h2 id="outside-result-heading">{{ dict(kinds)[r.kind] }} of {{ r.target }}{% if r.port %}, port {{ r.port }}{% endif %}{% if r.kind == "http" %}, {{ r.path }}{% endif %} from {{ r.where.label }}</h2>
+    <p class="dim">
+      {{ check.started_at|localtime }}
+      {%- if reused %} · shown again: the same check is kept {{ keep_minutes }} minutes, so nothing new was sent{% endif %}
+      {%- if check.measurement_id %} · Globalping measurement <code>{{ check.measurement_id }}</code>{% endif %}
+    </p>
+    {%- if check.error %}
+    <p class="form-error" role="alert">Globalping could not answer: {{ check.error }}.</p>
+    <p class="hint">That is the service, not {{ r.target }}: it says nothing about whether {{ r.target }} is up.</p>
+    {%- else %}
+    <div class="outside-result">
+      {{ donut_chart(reach) }}
+      <div class="table-wrap">
+        <table class="probes-table">
+          <caption class="visually-hidden">Each probe's answer</caption>
+          <thead>
+            <tr>
+              <th scope="col">From</th>
+              <th scope="col" class="col-optional">Network</th>
+              <th scope="col">Result</th>
+              {%- if r.kind == "http" %}
+              <th scope="col" class="num">Status</th>
+              <th scope="col" class="num">Time</th>
+              {%- elif r.kind == "traceroute" %}
+              <th scope="col" class="num">Hops</th>
+              {%- else %}
+              <th scope="col" class="num">Lost</th>
+              <th scope="col" class="num">Best</th>
+              <th scope="col" class="num">Average</th>
+              <th scope="col" class="num">Worst</th>
+              {%- endif %}
+            </tr>
+          </thead>
+          <tbody>
+            {%- for p in check.results %}
+            <tr>
+              <td>{{ p.city }}, {{ p.country }} <span class="dim">{{ p.continent }}</span></td>
+              <td class="col-optional">{{ p.network }}{% if p.asn %} <span class="dim">AS{{ p.asn }}</span>{% endif %}</td>
+              <td>
+                {%- if p.status != "finished" %}<span class="state state-unknown"><span class="glyph" aria-hidden="true">○</span> Probe could not check</span>
+                {%- elif p.reached %}<span class="state state-up"><span class="glyph" aria-hidden="true">●</span> Reached</span>
+                {%- else %}<span class="state state-down"><span class="glyph" aria-hidden="true">✕</span> Not reached</span>{% endif %}
+              </td>
+              {%- if r.kind == "http" %}
+              <td class="num">{{ p.http_status or "—" }}</td>
+              <td class="num">{{ p.avg_ms|ms }}</td>
+              {%- elif r.kind == "traceroute" %}
+              <td class="num">{{ p.hops if p.hops is not none else "—" }}</td>
+              {%- else %}
+              <td class="num">{% if p.loss is not none %}{{ "%.0f"|format(p.loss) }} %{% else %}—{% endif %}</td>
+              <td class="num">{{ p.min_ms|ms }}</td>
+              <td class="num">{{ p.avg_ms|ms }}</td>
+              <td class="num">{{ p.max_ms|ms }}</td>
+              {%- endif %}
+            </tr>
+            {%- endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {%- endif %}
+  </section>
+{%- endif %}
+</div>

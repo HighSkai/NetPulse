@@ -1,0 +1,108 @@
+{# The live part of the traffic page (plan section 29). While a capture runs it
+   polls itself every second; otherwise it holds the start form and does not
+   poll. The rate charts are preserved across swaps, so uPlot keeps its canvas
+   and traffic.js only gives it the new numbers. #}
+{% from "_charts.html" import bar_list, donut_chart %}
+{% from "_macros.html" import error_summary, field_error, invalid, packet_table, rate_charts %}
+{%- set running = status is not none and status.running %}
+<div id="traffic-view"{% if running %} hx-get="{{ url_for('netpulse.traffic_view') }}" hx-trigger="every 1s" hx-swap="outerHTML"{% endif %}>
+{%- if running %}
+  {%- set capture = status.capture %}
+  <section class="panel capture-live" aria-labelledby="live-heading">
+    <h2 id="live-heading"><span class="glyph live-dot" aria-hidden="true">◉</span> Capturing on {{ capture.description or capture.interface }}</h2>
+    <dl class="facts-list">
+      <dt>Running for</dt><dd>{{ status.elapsed_s|int|duration }} of {{ duration_text(limits.seconds) }}</dd>
+      <dt>Packets</dt><dd>{{ "{:,}".format(status.packets) }} of {{ "{:,}".format(limits.packets) }}</dd>
+      <dt>On the wire</dt><dd>{{ status.bytes|bytes }}</dd>
+      <dt>File</dt><dd>{{ status.file_bytes|bytes }} of {{ size_text(limits.bytes) }}</dd>
+      <dt>Filter</dt><dd>{% if capture.filter %}<code>{{ capture.filter }}</code>{% else %}everything{% endif %}</dd>
+      <dt>Keeps</dt><dd>{{ "headers only, 128 bytes a packet" if capture.snaplen == 128 else "whole packets" }}</dd>
+    </dl>
+    <div class="form-actions">
+      <form method="post" action="{{ url_for('netpulse.stop_capture') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="primary">Stop</button>
+      </form>
+      <a class="button" href="{{ url_for('netpulse.capture_download', capture_id=capture.id) }}">Download so far</a>
+    </div>
+  </section>
+
+  <section aria-labelledby="rate-heading">
+    <h2 id="rate-heading">Traffic per second, last 10 minutes</h2>
+    {{ rate_charts(chart, preserve=True) }}
+  </section>
+
+  <div class="overview-grid">
+    <section class="panel" aria-labelledby="protocols-heading">
+      <h2 id="protocols-heading">Protocols</h2>
+      {{ donut_chart(protocols) }}
+    </section>
+    <section class="panel" aria-labelledby="talkers-heading">
+      <h2 id="talkers-heading">Top talkers</h2>
+      {{ bar_list(talkers, "Bytes exchanged with this PC", "No traffic yet.", devices=False) }}
+    </section>
+  </div>
+
+  <section aria-labelledby="packets-heading">
+    <h2 id="packets-heading">Packets</h2>
+    <p class="packet-controls">
+      <button type="button" id="pause-packets" aria-pressed="false" hidden>Pause</button>
+      <span class="hint">The newest {{ packets|length }}, newest first. The whole capture is in its file.</span>
+    </p>
+    <div id="packet-list">{{ packet_table(packets, "The newest packets, newest first") }}</div>
+  </section>
+{%- else %}
+  {%- if status is not none and status.capture is not none %}
+  {%- set last = status.capture %}
+  <p class="{{ 'form-error' if last.state == 'failed' else 'notice' }}" role="status">
+    The last capture, on {{ last.description or last.interface }},
+    {%- if last.state == "failed" %} failed: {{ last.note }}.
+    {%- elif last.state == "limit" %} stopped when it {{ last.note }}.
+    {%- else %} was stopped.{% endif %}
+    It kept {{ "{:,}".format(last.packets) }} packets. <a href="{{ url_for('netpulse.capture_detail', capture_id=last.id) }}">Look at it</a>
+  </p>
+  {%- endif %}
+  <section class="panel" aria-labelledby="start-heading">
+    <h2 id="start-heading">Start a capture</h2>
+    {%- if reason %}
+    <p class="form-error" role="alert">{{ reason[:1]|upper }}{{ reason[1:] }}.</p>
+    <p class="hint">Packet capture needs Npcap, installed once from npcap.com with its "Restrict Npcap driver's access to Administrators only" option off. The rest of NetPulse works without it.</p>
+    {%- else %}
+    <form class="device-form capture-form" method="post" action="{{ url_for('netpulse.start_capture') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      {{ error_summary(form) }}
+      <label>Interface
+        <select name="interface" id="field-interface" required{{ invalid(form, "interface") }}>
+          {%- for name, label in choices %}
+          <option value="{{ name }}"{% if name == form.interface %} selected{% endif %}>{{ label }}</option>
+          {%- endfor %}
+        </select>
+        {{ field_error(form, "interface") }}
+      </label>
+      <label>Preset
+        <select name="preset" id="capture-preset">
+          {%- for label, text in presets %}
+          <option value="{{ text }}">{{ label }}</option>
+          {%- endfor %}
+        </select>
+      </label>
+      <label>Filter
+        <input name="filter" value="{{ form.filter }}" id="field-filter" maxlength="{{ filter_max }}"
+               placeholder="tcp port 443" autocomplete="off" spellcheck="false"{{ invalid(form, "filter") }}>
+        {{ field_error(form, "filter") }}
+        <span class="hint">Npcap's capture filter language, as in Wireshark. Left empty, the preset is used.</span>
+      </label>
+      <label class="check"><input type="checkbox" name="headers_only" value="yes"{% if form.headers_only %} checked{% endif %}> Headers only: keep the first 128 bytes of each packet</label>
+      <p class="hint">
+        A capture stops by itself after {{ duration_text(limits.seconds) }}, at {{ size_text(limits.bytes) }} of file, or at
+        {{ "{:,}".format(limits.packets) }} packets, whichever comes first. Nothing is captured until you press Start.
+        The file stays on this PC, and holds whatever the packets carried, so treat it as private.
+      </p>
+      <div class="form-actions">
+        <button type="submit" class="primary">Start capture</button>
+      </div>
+    </form>
+    {%- endif %}
+  </section>
+{%- endif %}
+</div>

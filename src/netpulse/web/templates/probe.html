@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% from "_macros.html" import error_summary, field_error, invalid, prompt %}
+{% set active_tab = "probe" %}
+
+{% block title %}Probe · NetPulse{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    {{ prompt("Probe: path", "probe", flags="--path") }}
+    <p class="dim">Follow the path from this PC to a host, hop by hop, to see where it slows down or loses packets.</p>
+  </div>
+</div>
+
+<nav class="subtabs" aria-label="Probe">
+  <a href="{{ url_for('netpulse.probe') }}" aria-current="page">Path</a>
+  <a href="{{ url_for('netpulse.outside') }}">Outside</a>
+</nav>
+
+<section class="panel" aria-labelledby="trace-heading">
+  <h2 id="trace-heading">Trace a path</h2>
+  {%- if not available %}
+  <p class="form-error" role="alert">Tracing is off in this NetPulse.</p>
+  {%- endif %}
+  <form class="device-form trace-form" method="post" action="{{ url_for('netpulse.start_trace') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {{ error_summary(form) }}
+    <label>Host
+      <input name="target" value="{{ form.target }}" id="field-target" required maxlength="253" placeholder="1.1.1.1 or example.com"
+             autocomplete="off" spellcheck="false"{{ invalid(form, "target") }}>
+      {{ field_error(form, "target") }}
+    </label>
+    <label>Rounds
+      <select name="rounds" id="field-rounds"{{ invalid(form, "rounds") }}>
+        {%- for rounds in rounds_choices %}
+        <option value="{{ rounds }}"{% if rounds == form.rounds %} selected{% endif %}>{{ "Once" if rounds == 1 else rounds ~ " rounds, to compare" }}</option>
+        {%- endfor %}
+      </select>
+    </label>
+    <div class="form-actions"><button type="submit" class="primary">Trace</button></div>
+    <p class="hint">
+      NetPulse sends echoes with a growing hop limit, up to {{ max_hops }} hops, {{ probes_per_hop }} to each, all at once,
+      so a round takes about a second. More rounds show which hops really lose packets, and where the path slows down.
+    </p>
+  </form>
+</section>
+
+{% include "_probe_view.html" %}
+
+<section aria-labelledby="traces-heading">
+  <h2 id="traces-heading">Past traces</h2>
+  <p class="hint">NetPulse keeps the last 100.</p>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th scope="col">Started</th>
+          <th scope="col">Host</th>
+          <th scope="col" class="col-optional">Address</th>
+          <th scope="col" class="num">Rounds</th>
+          <th scope="col">Reached</th>
+        </tr>
+      </thead>
+      <tbody>
+        {%- for past in traces %}
+        <tr>
+          <td><a href="{{ url_for('netpulse.trace_detail', trace_id=past.id) }}">{{ past.started_at|localtime }}</a></td>
+          <td>{{ past.target }}</td>
+          <td class="col-optional">{{ past.address }}</td>
+          <td class="num">{{ past.rounds }}</td>
+          <td>{% if past.reached %}<span class="state state-up"><span class="glyph" aria-hidden="true">●</span> Yes</span>{% else %}<span class="state state-down"><span class="glyph" aria-hidden="true">✕</span> No</span>{% endif %}</td>
+        </tr>
+        {%- else %}
+        <tr class="empty"><td colspan="5">No traces yet.</td></tr>
+        {%- endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

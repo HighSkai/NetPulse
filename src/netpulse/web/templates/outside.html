@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% from "_macros.html" import error_summary, field_error, invalid, prompt %}
+{% set active_tab = "probe" %}
+
+{% block title %}Outside · NetPulse{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    {{ prompt("Probe: outside", "probe", flags="--outside") }}
+    <p class="dim">Whether a server can be reached from outside this network, from probes around the world.</p>
+  </div>
+</div>
+
+<nav class="subtabs" aria-label="Probe">
+  <a href="{{ url_for('netpulse.probe') }}">Path</a>
+  <a href="{{ url_for('netpulse.outside') }}" aria-current="page">Outside</a>
+</nav>
+
+{# Plan section 31 (decision 007): what is sent, and to whom, before anything is. #}
+<section class="panel" aria-labelledby="consent-heading">
+  <h2 id="consent-heading">What is sent{% if consented %}: you agreed{% endif %}</h2>
+  <ul class="consent-facts">
+    <li>The checks run on <strong>Globalping</strong>, a free public service from jsDelivr, at api.globalping.io. Its probes are machines on networks around the world.</li>
+    <li>NetPulse sends it only what you type here: the host, the kind of check, the port or path, and where the probes should be. Nothing about this PC or your network is sent.</li>
+    <li><strong>Globalping's results are public:</strong> anyone with a check's id can see it, for up to about six months.</li>
+    <li>Only public hosts can be checked. Addresses and names on your own network are refused before anything is sent.</li>
+    <li>Without an account it allows 250 probe tests an hour from this PC. Each probe in a check is one test.</li>
+  </ul>
+  {%- if form.error and not consented %}
+  {{ error_summary(form) }}
+  {%- endif %}
+  {%- if not available %}
+  <p class="form-error" role="alert">Checks from outside are off in this NetPulse.</p>
+  {%- else %}
+  <form method="post" action="{{ url_for('netpulse.outside_consent') }}" class="form-actions">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {%- if consented %}
+    <input type="hidden" name="agree" value="no">
+    <button type="submit">Stop sending: withdraw my agreement</button>
+    {%- else %}
+    <input type="hidden" name="agree" value="yes">
+    <button type="submit" class="primary">I agree: send my checks to Globalping</button>
+    {%- endif %}
+  </form>
+  {%- endif %}
+</section>
+
+{%- if consented %}
+<section class="panel" aria-labelledby="outside-heading">
+  <h2 id="outside-heading">Check from outside</h2>
+  <form class="device-form outside-form" method="post" action="{{ url_for('netpulse.start_outside_check') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {{ error_summary(form) }}
+    <label>Check
+      <select name="kind" id="field-kind"{{ invalid(form, "kind") }}>
+        {%- for value, label in kinds %}
+        <option value="{{ value }}"{% if value == form.kind %} selected{% endif %}>{{ label }}</option>
+        {%- endfor %}
+      </select>
+    </label>
+    <label>Host
+      <input name="target" value="{{ form.target }}" id="field-target" required maxlength="253" placeholder="example.com" autocomplete="off" spellcheck="false"{{ invalid(form, "target") }}>
+      {{ field_error(form, "target") }}
+    </label>
+    <label>Port
+      <input name="port" value="{{ form.port }}" id="field-port" inputmode="numeric" maxlength="5" placeholder="TCP ping, HTTP"{{ invalid(form, "port") }}>
+      {{ field_error(form, "port") }}
+      <span class="hint">A TCP ping needs one. HTTP uses HTTPS on 443 unless you give another.</span>
+    </label>
+    <label>Path
+      <input name="path" value="{{ form.path }}" id="field-path" maxlength="200" spellcheck="false"{{ invalid(form, "path") }}>
+      {{ field_error(form, "path") }}
+      <span class="hint">HTTP only.</span>
+    </label>
+    <label>From
+      <select name="scope">
+        <option value="world"{% if form.scope == "world" %} selected{% endif %}>The whole world</option>
+        <option value="continent"{% if form.scope == "continent" %} selected{% endif %}>A continent</option>
+        <option value="country"{% if form.scope == "country" %} selected{% endif %}>A country</option>
+      </select>
+    </label>
+    <label>Continent
+      <select name="continent">
+        {%- for code, name in continents.items() %}
+        <option value="{{ code }}"{% if code == form.continent %} selected{% endif %}>{{ name }}</option>
+        {%- endfor %}
+      </select>
+    </label>
+    <label>Country
+      <input name="country" value="{{ form.country }}" id="field-country" maxlength="2" placeholder="DE" autocomplete="off"{{ invalid(form, "country") }}>
+      {{ field_error(form, "country") }}
+      <span class="hint">Two letters, as in DE or JP.</span>
+    </label>
+    <label>Probes
+      <input name="probes" value="{{ form.probes }}" id="field-probes" type="number" min="1" max="{{ max_probes }}" step="1" required{{ invalid(form, "probes") }}>
+      {{ field_error(form, "probes") }}
+    </label>
+    <div class="form-actions"><button type="submit" class="primary">Check</button></div>
+  </form>
+</section>
+{%- endif %}
+
+{% include "_outside_view.html" %}
+
+<section aria-labelledby="checks-heading">
+  <h2 id="checks-heading">Past checks</h2>
+  <p class="hint">NetPulse keeps the last 50.</p>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th scope="col">Asked</th><th scope="col">Check</th><th scope="col">Host</th><th scope="col" class="col-optional">From</th><th scope="col">Answer</th></tr>
+      </thead>
+      <tbody>
+        {%- for past in checks %}
+        <tr>
+          <td><a href="{{ url_for('netpulse.outside_check', check_id=past.id) }}">{{ past.started_at|localtime }}</a></td>
+          <td>{{ past.request.kind }}{% if past.request.port %} :{{ past.request.port }}{% endif %}</td>
+          <td>{{ past.request.target }}</td>
+          <td class="col-optional">{{ past.request.where.label }}</td>
+          <td>{% if past.error %}<span class="dim">no answer from Globalping</span>{% else %}{{ past.reached }} of {{ past.results|length }} reached it{% endif %}</td>
+        </tr>
+        {%- else %}
+        <tr class="empty"><td colspan="5">No checks yet.</td></tr>
+        {%- endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

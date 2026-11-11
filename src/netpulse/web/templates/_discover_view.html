@@ -1,0 +1,114 @@
+{# The sweep's progress and the review list (plan section 21). While a sweep
+   runs this refreshes every second; the answer after it ends stops refreshing. #}
+{% macro host_cells(host) -%}
+  <td>{{ host.address }}</td>
+  <td>{% if host.mac %}{{ host.mac }}{% if host.private_mac %} <span class="detail">private</span>{% endif %}{% else %}—{% endif %}</td>
+  <td>{{ host.name or "—" }}</td>
+  <td>{% if host.answers_ping %}yes{% else %}no <span class="detail">ARP only</span>{% endif %}</td>
+  <td class="col-optional">{{ host.last_seen|localtime }}</td>
+{%- endmacro %}
+{% macro host_head(last) -%}
+  <thead>
+    <tr>
+      <th scope="col">Address</th>
+      <th scope="col">MAC address</th>
+      <th scope="col">Name</th>
+      <th scope="col">Answers ping</th>
+      <th scope="col" class="col-optional">Last seen</th>
+      <th scope="col">{{ last }}</th>
+    </tr>
+  </thead>
+{%- endmacro %}
+{% macro action(host, verb, label, primary=False) -%}
+  <form method="post" action="{{ url_for('netpulse.' ~ verb ~ '_host', host_id=host.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit"{% if primary %} class="primary"{% endif %}>{{ label }}</button>
+  </form>
+{%- endmacro %}
+<section id="discover-view"
+  {%- if status and status.state == running %} hx-get="{{ url_for('netpulse.discover_view') }}" hx-trigger="every 1s" hx-swap="outerHTML"{% endif %}>
+  {% if status and status.state == running %}
+    <p class="sweep-status" role="status">Sweeping {{ status.network }}: {{ status.pinged }} of {{ status.total }} addresses pinged…</p>
+  {% elif status and status.state == "done" %}
+    <p class="sweep-status" role="status">
+      Swept {{ status.network }} in {{ status.seconds }} s, at {{ status.finished_at|localtime }}:
+      {{ status.found }} found, {{ status.answered }} answered ping, {{ status.arp_only }} ARP only.
+      {%- if status.note %} {{ status.note }}.{% endif %}
+    </p>
+  {% elif status and status.state == "failed" %}
+    <div class="notice" role="alert"><p><strong>The sweep failed.</strong> {{ status.error }}</p></div>
+  {% endif %}
+
+  <h2>To review ({{ new|length }})</h2>
+  {% if new %}
+  <div class="table-wrap">
+    <table class="hosts">
+      {{ host_head("Monitor it?") }}
+      <tbody>
+        {% for host, monitored in new %}
+        <tr id="host-{{ host.id }}">
+          {{ host_cells(host) }}
+          <td class="actions">
+            {% if monitored %}
+              Monitored as <a class="name-cut" href="{{ url_for('netpulse.device_detail', device_id=monitored.id) }}" title="{{ monitored.name }}">{{ monitored.name }}</a>
+              {{ action(host, "accept", "Link") }}
+            {% else %}
+              {{ action(host, "accept", "Accept", primary=True) }}
+            {% endif %}
+            {{ action(host, "ignore", "Ignore") }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if new|rejectattr("0.answers_ping")|list %}
+  <p class="hint">ARP only: the device answered Windows' address lookup but not ping. Monitoring it with ping would show it as Down.</p>
+  {% endif %}
+  {% else %}
+  <p class="dim">Nothing new to review.{% if not (accepted or ignored) %} Sweep a subnet to find devices.{% endif %}</p>
+  {% endif %}
+
+  {% if accepted %}
+  <h2>Monitored ({{ accepted|length }})</h2>
+  <div class="table-wrap">
+    <table class="hosts">
+      {{ host_head("Device") }}
+      <tbody>
+        {% for host, device in accepted %}
+        <tr id="host-{{ host.id }}">
+          {{ host_cells(host) }}
+          <td>
+            {% if device %}<a class="name-cut" href="{{ url_for('netpulse.device_detail', device_id=device.id) }}" title="{{ device.name }}">{{ device.name }}</a>
+              {%- if device.host != host.address|string %}
+              <span class="moved" role="note">{{ device.name }} pings {{ device.host }}, but this device is now at {{ host.address }}.
+                <a href="{{ url_for('netpulse.edit_device', device_id=device.id) }}">Edit</a></span>
+              {%- endif %}
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if ignored %}
+  <details>
+    <summary>Ignored ({{ ignored|length }})</summary>
+    <div class="table-wrap">
+      <table class="hosts">
+        {{ host_head("") }}
+        <tbody>
+          {% for host in ignored %}
+          <tr id="host-{{ host.id }}">
+            {{ host_cells(host) }}
+            <td class="actions">{{ action(host, "restore", "Review again") }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  {% endif %}
+</section>

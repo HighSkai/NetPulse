@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% from "_macros.html" import prompt %}
+{% set active_tab = "map" %}
+
+{% block title %}Map · NetPulse{% endblock %}
+
+{% block head %}
+  {# Plan section 19: Cytoscape.js ships with NetPulse, pinned by hash, and only this page loads it. #}
+  <script src="{{ url_for('static', filename='cytoscape-3.34.3.min.js') }}"
+          integrity="sha384-qPKQxl9uMXOw7vSTUDAnpUilhLuulovw6P5Z4db4bqxW5VhumS7przEmHX0iM0Oc" defer></script>
+  <script src="{{ url_for('static', filename='map.js') }}" defer></script>
+{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    {{ prompt("Map", "map") }}
+    <p class="dim">Lines show how NetPulse places each device, not cables. A ping proves a device answers, not the path to it.</p>
+  </div>
+</div>
+
+<div class="map-layout">
+  {# The drawing needs JavaScript; map.js shows it. The list beside it is the same tree. #}
+  <section class="map-drawing" aria-label="Map drawing" hidden>
+    <div class="map-toolbar">
+      <button type="button" data-map="zoom-in" aria-label="Zoom in">+</button>
+      <button type="button" data-map="zoom-out" aria-label="Zoom out">−</button>
+      <button type="button" data-map="fit">Fit</button>
+      <button type="button" data-map="reset" title="Forget where nodes were moved">Reset layout</button>
+      <label class="map-search">Search
+        <input type="search" data-map="search" placeholder="name or address" autocomplete="off" spellcheck="false">
+      </label>
+      <span class="dim" data-map="found" aria-live="polite"></span>
+    </div>
+    <div class="map-canvas" aria-hidden="true"></div>
+    <div class="map-tip" role="tooltip" hidden></div>
+    <div class="map-legend">
+      <span><span class="line-sample" aria-hidden="true"></span> Reported by Windows</span>
+      <span><span class="line-sample line-inferred" aria-hidden="true"></span> Inferred by NetPulse</span>
+      <span><span class="line-sample line-declared" aria-hidden="true"></span> Declared by you</span>
+      <span><span class="state-up" aria-hidden="true">●</span> Up <span class="state-degraded" aria-hidden="true">▲</span> Degraded
+        <span class="state-down" aria-hidden="true">✕</span> Down <span class="state-unknown" aria-hidden="true">○</span> Not checked</span>
+      <span>Hollow: not monitored</span>
+    </div>
+  </section>
+  {# The list scrolls in this box, which the 30 s refresh does not replace, so it keeps its place. #}
+  <div class="map-list">
+    {% include "_map_view.html" %}
+  </div>
+</div>
+{% endblock %}

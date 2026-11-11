@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% from "_macros.html" import prompt, sort_header, view_flags %}
+{% set active_tab = "devices" %}
+
+{% block content %}
+<section>
+  {{ prompt("Devices", "devices", flags=view_flags(view)) }}
+
+  {# Plan section 16: search and filter are a GET form, so they work without
+     JavaScript. With HTMX only #device-view is replaced, never this form, so
+     a slow reply cannot undo what is being typed. #}
+  <form id="device-filter" class="filters" role="search" method="get" action="{{ url_for('netpulse.dashboard') }}"
+        hx-get="{{ url_for('netpulse.dashboard') }}" hx-target="#device-view" hx-select="#device-view"
+        hx-select-oob="#page-prompt" hx-swap="outerHTML" hx-push-url="true" hx-sync="this:replace"
+        hx-trigger="input changed delay:300ms from:#device-search, change from:#device-status, submit">
+    <label>Search
+      <input id="device-search" type="search" name="q" value="{{ view.q }}" maxlength="100"
+             placeholder="name or host" autocomplete="off" spellcheck="false">
+    </label>
+    <label>Status
+      <select id="device-status" name="status">
+        {% for value, label in [("all", "All"), ("up", "Up"), ("degraded", "Degraded"), ("down", "Down"), ("unchecked", "Not checked")] %}
+          <option value="{{ value }}"{% if view.status == value %} selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit">Filter</button>
+  </form>
+
+  <div id="device-view">
+    {# The sort belongs to the filter form, but lives here so it is replaced with the table. #}
+    <input type="hidden" name="sort" value="{{ view.sort }}" form="device-filter">
+    <input type="hidden" name="dir" value="{{ view.direction }}" form="device-filter">
+    {% if view.is_filtered %}
+      <p class="hint">{{ rows|length }} of {{ total }} devices match. <a href="{{ url_for('netpulse.dashboard') }}">Show all</a></p>
+    {% endif %}
+    <div class="table-wrap">
+      <table class="devices">
+        <thead hx-boost="true" hx-target="#device-view" hx-select="#device-view" hx-select-oob="#page-prompt" hx-swap="outerHTML">
+          <tr>
+            {{ sort_header("Name", "name", view) }}
+            {{ sort_header("Host", "host", view) }}
+            {{ sort_header("Status", "status", view) }}
+            {{ sort_header("Latency", "latency", view, "num") }}
+            {{ sort_header("24 h", "availability", view, "num") }}
+            {{ sort_header("Last checked", "checked", view, "col-optional") }}
+            <th scope="col"><span class="visually-hidden">Actions</span></th>
+          </tr>
+        </thead>
+        {% include "_device_rows.html" %}
+      </table>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>Add a device</h2>
+  {% include "_add_form.html" %}
+</section>
+{% endblock %}

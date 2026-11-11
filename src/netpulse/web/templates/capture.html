@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% from "_macros.html" import packet_table, prompt, rate_charts %}
+{% from "_charts.html" import donut_chart %}
+{% set active_tab = "traffic" %}
+
+{% block title %}Capture {{ capture.id }} · NetPulse{% endblock %}
+
+{% block head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='uPlot-1.6.32.min.css') }}"
+        integrity="sha384-IfV0B7MIOYuO95kO9G5ySKPz/85zqFNOAs8iy4tkK5zd9izhJAB8b7lHrwYqqmYE">
+  <script src="{{ url_for('static', filename='uPlot-1.6.32.iife.min.js') }}"
+          integrity="sha384-Gx3t0zdBAuQOuvvmaLZj7HKEiSgWTAs+VdtNY7wt19QDPTDQjFIwAuXDj0zeN00c" defer></script>
+  <script src="{{ url_for('static', filename='traffic.js') }}" defer></script>
+{% endblock %}
+
+{% block content %}
+<p><a href="{{ url_for('netpulse.traffic') }}">&larr; All captures</a></p>
+<div class="page-head">
+  <div>
+    {{ prompt("Capture of " ~ (capture.description or capture.interface), "capture", target=capture.id|string, flags="--" ~ capture.state) }}
+    <p class="dim">{{ capture.description or capture.interface }}</p>
+  </div>
+  <div class="form-actions">
+    <a class="button" href="{{ url_for('netpulse.capture_download', capture_id=capture.id) }}">Download PCAP</a>
+  </div>
+</div>
+
+{% if capture.running %}
+<p class="notice" role="status">This capture is still running. <a href="{{ url_for('netpulse.traffic') }}">Watch it live</a>; the download holds it as it stands.</p>
+{% endif %}
+
+<dl class="facts-list capture-facts">
+  <dt>Started</dt><dd>{{ capture.started_at|localtime }}</dd>
+  <dt>Ended</dt><dd>{% if capture.ended_at %}{{ capture.ended_at|localtime }}, after {{ duration|duration }}{% else %}still running{% endif %}</dd>
+  <dt>Why</dt><dd>
+    {%- if capture.state == "running" %}running
+    {%- elif capture.state == "stopped" %}stopped by you
+    {%- elif capture.state == "limit" %}it {{ capture.note }}
+    {%- elif capture.state == "failed" %}it failed: {{ capture.note }}
+    {%- else %}{{ capture.note }}{% endif %}</dd>
+  <dt>Filter</dt><dd>{% if capture.filter %}<code>{{ capture.filter }}</code>{% else %}everything{% endif %}</dd>
+  <dt>Kept</dt><dd>{{ "headers only, 128 bytes a packet" if capture.snaplen == 128 else "whole packets" }}</dd>
+  <dt>Packets</dt><dd>{{ "{:,}".format(capture.packets) }}, {{ capture.bytes|bytes }} on the wire</dd>
+  <dt>File</dt><dd><code>{{ capture.file }}</code>, {{ file_bytes|bytes }}. It stays on this PC and holds whatever the packets carried.</dd>
+</dl>
+
+<section aria-labelledby="rate-heading">
+  <h2 id="rate-heading">Traffic per second</h2>
+  {{ rate_charts(chart) }}
+</section>
+
+<section class="panel capture-protocols" aria-labelledby="protocols-heading">
+  <h2 id="protocols-heading">Protocols</h2>
+  {{ donut_chart(protocols) }}
+</section>
+
+<section aria-labelledby="packets-heading">
+  <h2 id="packets-heading">Packets {% if packets %}{{ "{:,}".format(first) }} to {{ "{:,}".format(first + packets|length - 1) }}{% endif %}</h2>
+  <p class="hint">Read from the file, oldest first, {{ page_size }} to a page.</p>
+  {{ packet_table(packets, "Packets in this capture, oldest first", newest_first=False) }}
+  <nav class="pager" aria-label="Pages of packets">
+    {%- if page > 1 %}<a href="{{ url_for('netpulse.capture_detail', capture_id=capture.id, page=page - 1) }}">← Earlier</a>{% endif %}
+    {%- if more %}<a href="{{ url_for('netpulse.capture_detail', capture_id=capture.id, page=page + 1) }}">Later →</a>{% endif %}
+  </nav>
+</section>
+
+{% if not capture.running %}
+<section aria-labelledby="delete-heading">
+  <h2 id="delete-heading">Delete</h2>
+  <form class="device-form" method="post" action="{{ url_for('netpulse.delete_capture', capture_id=capture.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {%- if error %}
+    <div class="error-summary" role="alert" id="error-summary"><strong>There is a problem.</strong> <a href="#field-confirm">{{ error }}</a></div>
+    {%- endif %}
+    <label class="check"><input type="checkbox" name="confirm" id="field-confirm" value="yes" required{% if error %} aria-invalid="true" aria-describedby="error-confirm"{% endif %}> Delete this capture and its file for good</label>
+    {%- if error %}<span class="field-error" id="error-confirm">{{ error }}</span>{% endif %}
+    <div class="form-actions"><button type="submit" class="danger">Delete capture</button></div>
+  </form>
+</section>
+{% endif %}
+{% endblock %}

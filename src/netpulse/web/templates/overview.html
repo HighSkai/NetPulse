@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% from "_macros.html" import degraded_reasons, prompt %}
+{% from "_charts.html" import bar_list, donut_chart, status_grid %}
+{% set active_tab = "overview" %}
+
+{% block content %}
+{{ prompt("Overview", "overview") }}
+
+{# Plan section 26: problems first, then breakdowns, then history. The whole
+   view refreshes with the checks, from this same page. #}
+<div id="overview" hx-get="{{ url_for('netpulse.overview') }}" hx-trigger="every {{ refresh_s }}s"
+     hx-select="#overview" hx-swap="outerHTML">
+  {% include "_summary.html" %}
+
+  <div class="overview-grid">
+    <section class="panel problems" aria-labelledby="problems-heading">
+      <h2 id="problems-heading">Problems ({{ problems|length }})</h2>
+      {%- if problems %}
+      <ol class="problem-list">
+        {%- for problem in problems %}
+        {%- set row = problem.row %}
+        <li>
+          {%- if row.state == "down" %}
+          <span class="state state-down"><span class="glyph" aria-hidden="true">✕</span> Down</span>
+          {%- else %}
+          <span class="state state-degraded"><span class="glyph" aria-hidden="true">▲</span> Degraded</span>
+          {%- endif %}
+          <a class="name-cut" href="{{ url_for('netpulse.device_detail', device_id=row.status.device.id) }}" title="{{ row.status.device.name }}">{{ row.status.device.name }}</a>
+          <span class="problem-detail">
+            {%- if row.state == "degraded" %}{{ degraded_reasons(row) }}
+            {%- elif problem.outage %}for {{ problem.seconds(now)|duration }} · {{ problem.outage.error|error_label }}
+            {%- else %}{{ row.status.latest.error|error_label }} · an outage starts after {{ down_after }} failed checks in a row
+            {%- endif %}
+          </span>
+        </li>
+        {%- endfor %}
+      </ol>
+      {%- elif summary.monitored %}
+      <p class="all-clear"><span class="state state-up"><span class="glyph" aria-hidden="true">●</span> No problems.</span> Every checked device is up.</p>
+      {%- else %}
+      <p class="hint">No devices yet. <a href="{{ url_for('netpulse.dashboard') }}">Add one</a>, or <a href="{{ url_for('netpulse.discover') }}">discover</a> what is on this PC's network.</p>
+      {%- endif %}
+    </section>
+
+    <section class="panel breakdowns" aria-labelledby="breakdowns-heading">
+      <h2 id="breakdowns-heading">Breakdown</h2>
+      <div class="donuts">
+        {%- for chart in charts %}
+        {{ donut_chart(chart) }}
+        {%- endfor %}
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="slowest-heading">
+      <h2 id="slowest-heading">Slowest</h2>
+      {{ bar_list(slowest, "Average of the last checks", "No device has answered yet.") }}
+    </section>
+
+    <section class="panel" aria-labelledby="events-heading">
+      <h2 id="events-heading">Recent events</h2>
+      {%- if ledger %}
+      <div class="table-wrap">
+        <table class="ledger">
+          <thead><tr><th scope="col">Time</th><th scope="col">Device</th><th scope="col">Event</th><th scope="col" class="num">Lasted</th></tr></thead>
+          <tbody>
+            {%- for entry in ledger %}
+            {%- set event = entry.event %}
+            <tr class="ledger-{{ event.kind }}">
+              <td><time datetime="{{ event.at }}">{{ event.at|localtime }}</time></td>
+              <td><a class="name-cut" href="{{ url_for('netpulse.device_detail', device_id=event.device_id) }}" title="{{ names[event.device_id] }}">{{ names[event.device_id] }}</a></td>
+              <td>
+                {%- if event.kind == "down" %}<span class="state state-down"><span class="glyph" aria-hidden="true">✕</span> Down</span> <span class="detail">{{ event.error|error_label }}</span>
+                {%- else %}<span class="state state-up"><span class="glyph" aria-hidden="true">●</span> Up</span>
+                {%- endif %}
+              </td>
+              <td class="num">
+                {%- if entry.ongoing %}still down · {{ entry.lasted_s|duration }}
+                {%- elif entry.lasted_s is not none %}{{ entry.lasted_s|duration }}
+                {%- else %}—{% endif %}
+              </td>
+            </tr>
+            {%- endfor %}
+          </tbody>
+        </table>
+      </div>
+      {%- else %}
+      <p class="hint">No outages yet. A device goes down after {{ down_after }} failed checks in a row.</p>
+      {%- endif %}
+    </section>
+  </div>
+
+  <section aria-labelledby="grid-heading">
+    <h2 id="grid-heading">Last 24 h</h2>
+    {{ status_grid(grid) }}
+  </section>
+</div>
+{% endblock %}

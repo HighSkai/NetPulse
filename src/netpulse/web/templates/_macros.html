@@ -1,0 +1,158 @@
+{# A device state is a glyph and a word, never colour alone (plan section 14).
+   latency=False: the device table shows latency in its own column (plan section 16). #}
+{% macro status_label(result, latency=True) -%}
+  {% if result is none -%}
+    <span class="state state-unknown"><span class="glyph" aria-hidden="true">○</span> Not checked</span>
+  {%- elif result.success -%}
+    <span class="state state-up"><span class="glyph" aria-hidden="true">●</span> Up</span>
+    {%- if latency %} <span class="detail">{{ result.rtt_ms }} ms</span>{% endif %}
+  {%- else -%}
+    <span class="state state-down"><span class="glyph" aria-hidden="true">✕</span> Down</span> <span class="detail">{{ result.error|error_label }}</span>
+  {%- endif %}
+{%- endmacro %}
+
+{# A device row's state: the latest check's, with up split into up and degraded
+   (plan section 18). A degraded device says why, briefly. #}
+{% macro row_status(row) -%}
+  {% if row.state == "degraded" -%}
+    <span class="state state-degraded"><span class="glyph" aria-hidden="true">▲</span> Degraded</span>
+    {{- " " }}<span class="detail">{{ degraded_reasons(row) }}</span>
+  {%- else -%}
+    {{ status_label(row.status.latest, latency=False) }}
+  {%- endif %}
+{%- endmacro %}
+
+{% macro degraded_reasons(row) -%}
+  {%- set parts = [] -%}
+  {%- if "slow" in row.degraded_by %}{% set _ = parts.append("avg " ~ row.recent.avg_ms|ms) %}{% endif -%}
+  {%- if "failing" in row.degraded_by %}{% set _ = parts.append(row.recent.failures ~ " of " ~ row.recent.checks ~ " failed") %}{% endif -%}
+  {{ parts|join(" · ") }}
+{%- endmacro %}
+
+{# A sortable column header (plan section 16): a link that sorts ascending,
+   then reverses. Only the sorted column carries aria-sort. #}
+{% macro sort_header(label, key, view, class_="") -%}
+  {%- set sorted = view.sort == key -%}
+  <th scope="col"{% if class_ %} class="{{ class_ }}"{% endif %}
+      {%- if sorted %} aria-sort="{{ 'ascending' if view.direction == 'asc' else 'descending' }}"{% endif %}>
+    <a class="sort" href="{{ url_for('netpulse.dashboard', **view.sorted_by(key)) }}">{{ label }}
+      {%- if sorted %} <span aria-hidden="true">{{ "▲" if view.direction == "asc" else "▼" }}</span>{% endif -%}
+    </a>
+  </th>
+{%- endmacro %}
+
+{% macro device_fields(form) -%}
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  {{ error_summary(form) }}
+  <label>Name
+    <input name="name" value="{{ form.name }}" id="field-name" required maxlength="64" autocomplete="off"{{ invalid(form, "name") }}>
+    {{ field_error(form, "name") }}
+  </label>
+  <label>Host
+    <input name="host" value="{{ form.host }}" id="field-host" required placeholder="192.168.1.1 or printer.lan"
+           autocomplete="off" autocapitalize="off" spellcheck="false"{{ invalid(form, "host") }}>
+    {{ field_error(form, "host") }}
+  </label>
+{%- endmacro %}
+
+{# A page heading written as a prompt line (plan section 25):
+   "~/netpulse ❯ device Router --edit". Screen readers skip the line and read
+   the page's title instead. #}
+{% macro prompt(title, command, target="", flags="", id="page-prompt") -%}
+<h1 class="prompt" id="{{ id }}"><span aria-hidden="true"><span class="prompt-path">~/netpulse</span> <span class="prompt-sign">❯</span> {{ command }}
+  {%- if target %} <strong>{{ target }}</strong>{% endif %}
+  {%- if flags %} <span class="prompt-args">{{ flags }}</span>{% endif %}</span><span class="visually-hidden">{{ title }}</span></h1>
+{%- endmacro %}
+
+{# The device table's view as command-line flags: --all, or what differs from it. #}
+{% macro view_flags(view) -%}
+  {%- for key, value in view.params.items() -%}
+    {{ " " if not loop.first }}--{{ key }}={{ '"%s"'|format(value) if key == "q" else value }}
+  {%- else -%}
+    --all
+  {%- endfor %}
+{%- endmacro %}
+
+{# Packet summaries as a table (plan section 29), in the ledger style: time to
+   the microsecond, the two ends, protocol, ports, length and flags. #}
+{% macro packet_table(packets, caption, newest_first=True) -%}
+<div class="table-wrap">
+  <table class="packets">
+    <caption class="visually-hidden">{{ caption }}</caption>
+    <thead>
+      <tr>
+        <th scope="col">Time</th>
+        <th scope="col">Source</th>
+        <th scope="col">Destination</th>
+        <th scope="col">Protocol</th>
+        <th scope="col" class="col-optional">Ports</th>
+        <th scope="col" class="num">Length</th>
+        <th scope="col" class="col-optional">Flags</th>
+      </tr>
+    </thead>
+    <tbody>
+      {%- for p in packets %}
+      <tr data-t="{{ p.time_ns }}">
+        <td><time>{{ p.time_ns|packet_time }}</time></td>
+        <td>{{ p.src or "—" }}</td>
+        <td>{{ p.dst or "—" }}</td>
+        <td>{{ p.protocol }}</td>
+        <td class="col-optional">{% if p.src_port is not none %}{{ p.src_port }} → {{ p.dst_port }}{% else %}—{% endif %}</td>
+        <td class="num">{{ p.length }}</td>
+        <td class="col-optional">
+          {%- set flags = [] %}
+          {%- if p.tcp_flags %}{% set _ = flags.append(p.tcp_flags|join(" ")) %}{% endif %}
+          {%- if p.icmp_type is not none %}{% set _ = flags.append("type " ~ p.icmp_type ~ " code " ~ p.icmp_code) %}{% endif %}
+          {%- if p.vlan is not none %}{% set _ = flags.append("VLAN " ~ p.vlan) %}{% endif %}
+          {%- if p.truncated %}{% set _ = flags.append("cut short") %}{% endif %}
+          {{- flags|join(" · ") or "—" -}}
+        </td>
+      </tr>
+      {%- else %}
+      <tr class="empty"><td colspan="7">No packets yet.</td></tr>
+      {%- endfor %}
+    </tbody>
+  </table>
+</div>
+{%- endmacro %}
+
+{# A rate graph's two charts, bytes and packets per second, in and out. The
+   numbers sit beside them as JSON; traffic.js draws them with uPlot. #}
+{% macro rate_charts(chart, preserve=False) -%}
+<div id="rate-charts" class="rate-charts"{% if preserve %} hx-preserve="true"{% endif %}>
+  <figure class="rate-chart">
+    <figcaption class="chart-title">Bytes per second</figcaption>
+    <div class="chart" data-rate-chart="bytes"><p class="hint">The graph needs JavaScript.</p></div>
+  </figure>
+  <figure class="rate-chart">
+    <figcaption class="chart-title">Packets per second</figcaption>
+    <div class="chart" data-rate-chart="packets"><p class="hint">The graph needs JavaScript.</p></div>
+  </figure>
+</div>
+<script type="application/json" id="rate-data">{{ chart|tojson }}</script>
+<p class="legend">
+  <span class="line-sample line-in"></span>into this PC
+  <span class="line-sample line-out"></span>out of this PC
+  · peak {{ ((chart.bytes_in|max) if chart.bytes_in else 0)|bytes }}/s in, {{ ((chart.bytes_out|max) if chart.bytes_out else 0)|bytes }}/s out
+</p>
+{%- endmacro %}
+
+{# Plan section 32: one way to refuse a form. A summary at the top of the
+   form, linked to the field; the field marked invalid and described by its
+   message. Fields have id="field-<name>". #}
+{% macro error_summary(form) -%}
+  {%- if form.error %}
+  <div class="error-summary" role="alert" id="error-summary">
+    <strong>There is a problem.</strong>
+    {% if form.error_field %}<a href="#field-{{ form.error_field }}">{{ form.error }}</a>{% else %}{{ form.error }}{% endif %}
+  </div>
+  {%- endif %}
+{%- endmacro %}
+
+{% macro invalid(form, field) -%}
+  {%- if form.error_field == field %} aria-invalid="true" aria-describedby="error-{{ field }}"{% endif -%}
+{%- endmacro %}
+
+{% macro field_error(form, field) -%}
+  {%- if form.error_field == field %}<span class="field-error" id="error-{{ field }}">{{ form.error }}</span>{% endif -%}
+{%- endmacro %}

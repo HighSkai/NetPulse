@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% from "_macros.html" import error_summary, field_error, invalid, prompt %}
+{% set active_tab = "settings" %}
+
+{% block title %}Settings · NetPulse{% endblock %}
+
+{% block content %}
+{{ prompt("Settings", "settings") }}
+
+{% for message in get_flashed_messages() %}
+  <p class="saved" role="status">{{ message }}</p>
+{% endfor %}
+
+<section aria-labelledby="degraded-heading">
+  <h2 id="degraded-heading">When a device counts as degraded</h2>
+  <p class="hint">
+    A device that answers is degraded when its last {{ window }} checks are slow or keep failing.
+    The dashboard and device pages apply new values straight away. Stored history and outages do not change.
+  </p>
+  <form class="device-form settings-form" method="post" action="{{ url_for('netpulse.save_settings') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {{ error_summary(form) }}
+    <label>Slow: average above, in ms
+      <input name="latency_ms" value="{{ form.latency_ms }}" id="field-latency_ms" inputmode="numeric" required
+             type="number" min="1" max="{{ latency_max }}" step="1"{{ invalid(form, "latency_ms") }}>
+      {{ field_error(form, "latency_ms") }}
+      <span class="hint">1 to {{ latency_max }}. Ping waits at most {{ latency_max }} ms for a reply.</span>
+    </label>
+    <label>Failing: failures in the last {{ window }}
+      <input name="failures" value="{{ form.failures }}" id="field-failures" inputmode="numeric" required
+             type="number" min="1" max="{{ window }}" step="1"{{ invalid(form, "failures") }}>
+      {{ field_error(form, "failures") }}
+      <span class="hint">1 to {{ window }}. This many or more failed checks count.</span>
+    </label>
+    <div class="form-actions">
+      <button type="submit" class="primary">Save</button>
+    </div>
+  </form>
+</section>
+
+<section aria-labelledby="fixed-heading">
+  <h2 id="fixed-heading">Fixed in this version</h2>
+  <ul class="fixed">
+    <li>Every device is checked every {{ interval_s }} s.</li>
+    <li>An outage starts after {{ down_after }} failed checks in a row.</li>
+    <li>Degraded looks at the last {{ window }} checks.</li>
+  </ul>
+</section>
+
+{# Plan section 32: what NetPulse keeps on this PC. #}
+<section aria-labelledby="disk-heading">
+  <h2 id="disk-heading">On this PC</h2>
+  <dl class="facts-list">
+    <dt>Database</dt>
+    <dd>{{ database_bytes|bytes }} · <code>{{ database }}</code><span class="hint"> with its write-ahead log</span></dd>
+    <dt>Captures</dt>
+    <dd>{{ capture_bytes|bytes }} in {{ capture_files }} {{ "file" if capture_files == 1 else "files" }} · <code>{{ folder }}</code></dd>
+  </dl>
+  <p class="hint">
+    Every hour NetPulse deletes captures, traces and checks from outside past their limits, folds its
+    write-ahead log into the database, and lets SQLite refresh its statistics. Check history is kept.
+  </p>
+</section>
+
+{# Plan section 25: a short manual, laid out like a man page. #}
+<section aria-labelledby="help-heading">
+  <h2 id="help-heading">Help</h2>
+  <div class="man">
+    <p class="man-head" aria-hidden="true"><span>NETPULSE(1)</span><span>NetPulse manual</span></p>
+    <img class="man-wordmark" src="{{ url_for('static', filename='wordmark.svg') }}" alt="netpulse" width="375" height="120">
+    <h3>NAME</h3>
+    <p>netpulse — a network monitor for this PC</p>
+    <h3>SYNOPSIS</h3>
+    <p>netpulse [--db PATH] [--port N] [--debug]</p>
+    <h3>DESCRIPTION</h3>
+    <p>
+      NetPulse pings every device every {{ interval_s }} s, keeps every result in a SQLite file,
+      and serves these pages to this PC only, on 127.0.0.1. There is no login, and nothing is sent anywhere else.
+    </p>
+    <h3>PAGES</h3>
+    <dl>
+      {%- for tab in tabs %}
+      <dt><kbd>Alt</kbd>+<kbd>{{ tab.key }}</kbd> {{ tab.name }}</dt>
+      <dd>{{ tab.about }}</dd>
+      {%- endfor %}
+    </dl>
+    <h3>STATES</h3>
+    <dl>
+      <dt><span class="state state-up"><span class="glyph" aria-hidden="true">●</span> Up</span></dt>
+      <dd>the last check got an answer</dd>
+      <dt><span class="state state-degraded"><span class="glyph" aria-hidden="true">▲</span> Degraded</span></dt>
+      <dd>up, but its last {{ window }} checks were slow or kept failing, by the thresholds above</dd>
+      <dt><span class="state state-down"><span class="glyph" aria-hidden="true">✕</span> Down</span></dt>
+      <dd>the last check got no answer; {{ down_after }} in a row start an outage</dd>
+      <dt><span class="state state-unknown"><span class="glyph" aria-hidden="true">○</span> Not checked</span></dt>
+      <dd>no check yet</dd>
+    </dl>
+    <h3>MOTION</h3>
+    <p>
+      The background drifts, the status dot pulses while checks run, and a row flashes when it changes.
+      Motion in the status bar switches all three off in this browser. Nothing moves when Windows is set to reduce motion.
+    </p>
+  </div>
+</section>
+{% endblock %}

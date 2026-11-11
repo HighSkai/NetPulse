@@ -1,0 +1,74 @@
+{# The trace in progress, or the trace shown (plan section 30). While a trace
+   runs this polls itself every second; when it ends, the page reloads so the
+   list of past traces has it too. #}
+<div id="probe-view"{% if running %} hx-get="{{ url_for('netpulse.probe_view') }}" hx-trigger="every 1s" hx-swap="outerHTML"{% endif %}>
+{%- if running %}
+  <p class="sweep-status" role="status"><span class="glyph live-dot" aria-hidden="true">◉</span> Tracing {{ status.target }}
+    · {{ status.round }} of {{ status.rounds }} {{ "round" if status.rounds == 1 else "rounds" }} done</p>
+{%- elif status is not none and status.state == "failed" and trace is none %}
+  <p class="form-error" role="alert">{{ status.error[:1]|upper }}{{ status.error[1:] }}</p>
+{%- endif %}
+{%- if trace is not none and not running %}
+  <section aria-labelledby="path-heading">
+    <h2 id="path-heading">Path to {{ trace.target }}{% if trace.target != trace.address %} ({{ trace.address }}){% endif %}</h2>
+    <p class="dim">
+      {{ trace.started_at|localtime }} · {{ trace.rounds }} {{ "round" if trace.rounds == 1 else "rounds" }} of {{ probes_per_hop }} echoes a hop ·
+      {% if trace.reached %}reached in {{ trace.hops|length }} {{ "hop" if trace.hops|length == 1 else "hops" }}{% else %}{{ trace.error }}{% endif %}
+    </p>
+
+    {#- The path as a chain of boxes, in the /treasury flow style. #}
+    <ol class="path-chain" aria-label="The path, hop by hop">
+      <li class="path-box path-pc"><strong>this PC</strong></li>
+      {%- for hop in trace.hops %}
+      <li class="path-box{% if hop.label %} path-{{ hop.label|replace(' ', '-') }}{% endif %}{% if hop.note and 'slow link' in hop.note %} path-slow{% endif %}">
+        <span class="path-ttl">{{ hop.ttl }}</span>
+        {%- if hop.address %}
+        <strong>{{ hop.name or hop.address }}</strong>
+        {%- if hop.name %}<span class="dim">{{ hop.address }}</span>{% endif %}
+        <span>{{ hop.avg_ms|ms }}{% if hop.loss_percent %} · {{ "%.0f"|format(hop.loss_percent) }} % lost{% endif %}</span>
+        {%- if hop.label %}<span class="path-label">{{ hop.label }}</span>{% endif %}
+        {%- else %}
+        <strong>*</strong><span class="dim">no answer</span>
+        {%- endif %}
+      </li>
+      {%- endfor %}
+    </ol>
+
+    <div class="table-wrap">
+      <table class="hops">
+        <caption class="visually-hidden">Each hop of the path to {{ trace.target }}</caption>
+        <thead>
+          <tr>
+            <th scope="col" class="num">Hop</th>
+            <th scope="col">Address</th>
+            <th scope="col" class="col-optional">Name</th>
+            <th scope="col">Where</th>
+            <th scope="col" class="num">Lost</th>
+            <th scope="col" class="num">Best</th>
+            <th scope="col" class="num">Average</th>
+            <th scope="col" class="num">Worst</th>
+            <th scope="col">Note</th>
+          </tr>
+        </thead>
+        <tbody>
+          {%- for hop in trace.hops %}
+          <tr{% if hop.note and 'slow link' in hop.note %} class="hop-slow"{% endif %}>
+            <td class="num">{{ hop.ttl }}</td>
+            <td>{{ hop.address or "*" }}{% if hop.others %} <span class="dim">also {{ hop.others|join(", ") }}</span>{% endif %}</td>
+            <td class="col-optional">{{ hop.name or "—" }}</td>
+            <td>{{ hop.label or "—" }}</td>
+            <td class="num">{{ hop.sent - hop.received }} of {{ hop.sent }}</td>
+            <td class="num">{{ hop.best_ms|ms }}</td>
+            <td class="num">{{ hop.avg_ms|ms }}</td>
+            <td class="num">{{ hop.worst_ms|ms }}</td>
+            <td class="hop-note">{{ hop.note or "" }}</td>
+          </tr>
+          {%- else %}
+          <tr class="empty"><td colspan="9">Nothing answered.</td></tr>
+          {%- endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{%- endif %}
+</div>

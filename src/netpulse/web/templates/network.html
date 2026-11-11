@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% from "_macros.html" import prompt, row_status %}
+{% set active_tab = "network" %}
+
+{% block title %}Network · NetPulse{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    {{ prompt("Network", "network") }}
+    <p class="dim">This PC's network settings, as Windows reports them.</p>
+  </div>
+  <div class="form-actions">
+    <form method="post" action="{{ url_for('netpulse.refresh_network') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit">Refresh</button>
+    </form>
+    <a class="button" href="{{ url_for('netpulse.topology_map') }}">Map</a>
+  </div>
+</div>
+
+{% if error %}
+<div class="notice" role="note">
+  <p><strong>Network settings unavailable.</strong> {{ error[:1]|upper }}{{ error[1:] }}.</p>
+  <p>NetPulse tries again after {{ failed_read_s }} s, or when you press Refresh. Monitoring is not affected.</p>
+</div>
+{% else %}
+<section class="summary facts" aria-label="Facts">
+  <div class="stat">
+    <span class="stat-value stat-small">{{ info.computer }}</span>
+    <span class="stat-label">this PC</span>
+  </div>
+  <div class="stat stat-wide">
+    <span class="stat-value stat-small">
+      {%- if info.preferred_gateway is none %}none
+      {%- elif gateway_device %}{{ info.preferred_gateway }} · <a href="{{ url_for('netpulse.device_detail', device_id=gateway_device.id) }}">{{ gateway_device.name }}</a>
+      {%- else %}{{ info.preferred_gateway }}{% endif -%}
+    </span>
+    <span class="stat-label">gateway</span>
+  </div>
+  <div class="stat">
+    <span class="stat-value stat-small">{{ info.read_at|localtime }}</span>
+    <span class="stat-label">read from Windows</span>
+  </div>
+</section>
+
+{% if info.preferred_gateway is not none %}
+{# Plan section 22: only what Windows and NetPulse already know. NetPulse asks
+   the router nothing: no login, no router API, no UPnP. #}
+{% set gateway = info.preferred_gateway %}
+{% set adapter = info.gateway_adapter %}
+{% set lease = adapter.lease %}
+<h2>Router</h2>
+<p class="hint">What Windows and NetPulse already know about the gateway. NetPulse asks the router nothing: no login and no router API.</p>
+<dl class="router">
+  <dt>Address</dt>
+  <dd>{{ gateway }} on {{ adapter.name }} · <a href="{{ admin_url }}" rel="noreferrer">admin page</a></dd>
+  <dt>MAC address</dt>
+  <dd>{{ info.mac_of(gateway) or "not reported by Windows" }}</dd>
+  <dt>Name</dt>
+  <dd>{% if gateway_name %}{{ gateway_name }}{% else %}not known <span class="detail">a discovery sweep finds it, if the router gives one</span>{% endif %}</dd>
+  <dt>Internet</dt>
+  <dd>{{ {"internet": "Windows reports internet access", "local network only": "Windows reports the local network only, no internet",
+          "no traffic": "Windows reports no traffic", "disconnected": "Windows reports it disconnected"}.get(adapter.connectivity, "not reported by Windows") }}</dd>
+  <dt>Gives this PC its address</dt>
+  <dd>
+    {%- if lease and lease.server == gateway %}yes, by DHCP
+      {%- if lease.obtained %} · lease from {{ lease.obtained|localtime }}{% endif %}
+      {%- if lease.expires %} · expires {{ lease.expires|localtime }}{% endif %}
+    {%- elif lease and lease.server %}no: {{ lease.server }} does, by DHCP
+    {%- elif adapter.dhcp is false %}no: this PC's address is set by hand
+    {%- else %}not reported by Windows{% endif -%}
+  </dd>
+  <dt>Answers this PC's DNS</dt>
+  <dd>{{ "yes" if gateway in adapter.dns_servers else "no" }}</dd>
+  <dt>Monitoring</dt>
+  <dd>
+    {%- if gateway_row %}
+      <a href="{{ url_for('netpulse.device_detail', device_id=gateway_device.id) }}">{{ gateway_device.name }}</a>
+      {{ row_status(gateway_row) }}
+      {%- if gateway_row.latency_ms is not none and gateway_row.state == "up" %} <span class="detail">{{ gateway_row.latency_ms }} ms</span>{% endif %}
+      {%- if gateway_row.availability.checks %} · {{ gateway_row.availability|percent }} of checks up, 24 h{% endif %}
+    {%- else %}
+      {# Plan section 19: offer to monitor the gateway, through the ordinary add route. #}
+      <form class="monitor-gateway" method="post" action="{{ url_for('netpulse.add_device') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="name" value="Gateway">
+        <input type="hidden" name="host" value="{{ gateway }}">
+        <p>Not monitored. <button type="submit" class="primary">Monitor the gateway</button></p>
+      </form>
+    {%- endif %}
+  </dd>
+</dl>
+{% endif %}
+
+<h2>Adapters</h2>
+{% if info.adapters %}
+<div class="table-wrap">
+  <table class="adapters">
+    <thead>
+      <tr>
+        <th scope="col">Adapter</th>
+        <th scope="col">IPv4 address</th>
+        <th scope="col">Gateway</th>
+        <th scope="col">DNS servers</th>
+        <th scope="col" class="col-optional">DHCP</th>
+        <th scope="col" class="col-optional">Network</th>
+        <th scope="col">MAC address</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for adapter in info.adapters %}
+      <tr>
+        <td>{{ adapter.name }}<span class="detail">{{ adapter.description }}</span></td>
+        <td>{% for address in adapter.addresses %}{{ address }}{% if not loop.last %}<br>{% endif %}{% endfor %}</td>
+        <td>{{ adapter.gateways|join(", ") or "—" }}</td>
+        <td>{{ adapter.dns_servers|join(", ") or "—" }}</td>
+        <td class="col-optional">{{ {True: "on", False: "off"}.get(adapter.dhcp, "—") }}</td>
+        <td class="col-optional">{{ (adapter.category or "—")|capitalize }}</td>
+        <td>{{ adapter.mac or "—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="dim">Windows reports no connected adapter with an IPv4 address.</p>
+{% endif %}
+<p class="hint">
+  Adapters that are down, and addresses Windows is not using yet, are left out.
+  NetPulse reads the settings again after {{ good_read_min }} minutes, or when you press Refresh.
+</p>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,8 @@
+{# Plan section 28: while a capture runs, every page says so. Always present,
+   empty when nothing is captured, so the status bar's poll can replace it
+   (oob=True): a capture started or stopped elsewhere shows within 10 s.
+   Not named capture: that would hide a page's own capture variable. #}
+{%- set capturing = capture_status() %}
+<div id="capture-banner" class="capture-banner" role="status"{% if oob %} hx-swap-oob="true"{% endif %}{% if not capturing.running %} hidden{% endif %}>
+  {%- if capturing.running %}<span class="glyph live-dot" aria-hidden="true">◉</span> Capturing packets on {{ capturing.capture.description or capturing.capture.interface }} since {{ capturing.capture.started_at|localtime }}. The capture file stays on this PC and holds whatever the packets carried. <a href="{{ url_for('netpulse.traffic') }}">See it on the traffic page</a>.{% endif -%}
+</div>

@@ -1,0 +1,52 @@
+{% from "_macros.html" import row_status %}
+{# The map as a list, and the same tree as JSON for map.js (plan section 19).
+   Refreshes itself on the device table's interval. Ids are kept stable so
+   HTMX restores focus after each swap. #}
+{% macro node_line(node) -%}
+  <div class="map-node">
+    {%- if node.row %}
+      <a id="map-link-{{ node.id }}" href="{{ url_for('netpulse.device_detail', device_id=node.row.status.device.id) }}">{{ node.label }}</a>
+      <span class="dim">{{ node.detail }}</span>
+      {{ row_status(node.row) }}
+      {%- if node.row.latency_ms is not none and node.row.state == "up" %} <span class="detail">{{ node.row.latency_ms }} ms</span>{% endif %}
+      {#- Plan section 30: trace the path to it. #}
+      <a class="trace-link" href="{{ url_for('netpulse.probe', target=node.row.status.device.host) }}">trace</a>
+    {%- else %}
+      <strong>{{ node.label }}</strong>
+      {%- if node.detail %} <span class="dim">{{ node.detail }}</span>{% endif %}
+      {%- if node.kind == "gateway" %} <span class="dim">· not monitored</span>{% endif %}
+    {%- endif %}
+    {%- if node.explanation %}
+      <span class="evidence evidence-{{ node.evidence or 'none' }}">{{ node.explanation }}</span>
+    {%- endif %}
+  </div>
+{%- endmacro %}
+{# Each node, then the nodes under it. Since plan section 20 a device that is
+   not placed can have devices under it too. #}
+{% macro branch(topology, nodes) -%}
+  {%- for node in nodes %}
+    <li id="map-item-{{ node.id }}" data-node="{{ node.id }}">
+      {{ node_line(node) }}
+      {%- set children = topology.children(node.id) %}
+      {%- if children %}
+      <ul>{{ branch(topology, children) }}</ul>
+      {%- endif %}
+    </li>
+  {%- endfor %}
+{%- endmacro %}
+<section id="map-view" aria-labelledby="map-list-heading"
+         hx-get="{{ url_for('netpulse.map_view') }}" hx-trigger="every {{ refresh_s }}s" hx-swap="outerHTML">
+  <h2 id="map-list-heading">On the map</h2>
+  {% if topology.network_error %}
+  <div class="notice" role="note">
+    <p><strong>Network settings unavailable:</strong> {{ topology.network_error }}.
+      Only devices on this PC can be placed. <a href="{{ url_for('netpulse.network') }}">Network</a></p>
+  </div>
+  {% endif %}
+  <ul class="map-tree">{{ branch(topology, topology.roots) }}</ul>
+  {% if topology.unplaced %}
+  <h3>Not placed</h3>
+  <ul class="map-tree">{{ branch(topology, topology.unplaced) }}</ul>
+  {% endif %}
+  <script type="application/json" id="map-data">{{ topology.elements()|tojson }}</script>
+</section>

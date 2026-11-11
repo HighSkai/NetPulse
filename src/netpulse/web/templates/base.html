@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  {# Swap 422 responses so validation errors replace the form. Other 4xx/5xx are not swapped. #}
+  <meta name="htmx-config" content='{"responseHandling": [{"code": "204", "swap": false}, {"code": "[23]..", "swap": true}, {"code": "422", "swap": true}, {"code": "[45]..", "swap": false, "error": true}, {"code": "...", "swap": true}]}'>
+  <title>{% block title %}NetPulse{% endblock %}</title>
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  {# Plan section 25: the regular weight is on every page, so fetch it with the stylesheet. #}
+  <link rel="preload" href="{{ url_for('static', filename='IBMPlexMono-1.1.0-Regular-Latin1.woff2') }}" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  {# Runs before the page is drawn, so a viewer who switched motion off never sees it start. #}
+  <script src="{{ url_for('static', filename='motion.js') }}"></script>
+  {# Plan section 14: HTMX ships with NetPulse, so nothing loads from another
+     site. The hash is the one v1 pinned for unpkg; tests check the file matches. #}
+  <script src="{{ url_for('static', filename='htmx-2.0.4.min.js') }}"
+          integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+" defer></script>
+  <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+  {% block head %}{% endblock %}
+</head>
+<body>
+  {# Pages set active_tab. The tab bar lists only pages that exist, each with
+     its number from plan section 25 and Alt and that number as its shortcut. #}
+  <header class="app-bar">
+    <a class="brand" href="{{ url_for('netpulse.overview') }}">
+      <img src="{{ url_for('static', filename='logo.svg') }}" alt="" width="26" height="26">
+      <span class="brand-name">netpulse</span><span class="visually-hidden"> home</span>
+    </a>
+    <nav class="tabs" aria-label="Sections">
+      {%- for tab in tabs %}
+      <a href="{{ url_for(tab.endpoint) }}" data-key="{{ tab.key }}" aria-keyshortcuts="Alt+{{ tab.key }}" title="Alt+{{ tab.key }}"
+         {%- if active_tab == tab.name %} aria-current="page"{% endif %}><span class="tab-key" aria-hidden="true">{{ tab.key }}:</span>{{ tab.name }}</a>
+      {%- endfor %}
+    </nav>
+  </header>
+  {% include "_capture_banner.html" %}
+  <div id="request-error" class="banner" role="alert" hidden></div>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="status-bar">
+    {% include "_status_bar.html" %}
+    <div class="status-tools">
+      {# This PC's clock; app.js keeps it ticking. NetPulse runs on this PC, so the server's time is the viewer's. #}
+      <time id="clock" datetime="{{ now_utc.strftime('%Y-%m-%dT%H:%M:%SZ') }}" title="{{ now_utc.strftime('%Y-%m-%d %H:%M:%S') }} UTC">{{ now_utc|clock }}</time>
+      {# Shown by motion.js; without JavaScript it could not do anything. #}
+      <button type="button" id="motion-toggle" aria-pressed="true" hidden>Motion: <span class="motion-state" aria-hidden="true">on</span></button>
+    </div>
+  </footer>
+</body>
+</html>

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% from "_macros.html" import device_fields, field_error, invalid, prompt %}
+{% set active_tab = "devices" %}
+
+{% block title %}Edit {{ device.name }} · NetPulse{% endblock %}
+
+{% block content %}
+<p><a href="{{ url_for('netpulse.dashboard', **view.params) }}">&larr; All devices</a></p>
+{{ prompt("Edit " ~ device.name, "device", target=device.name, flags="--edit") }}
+<form class="device-form" method="post" action="{{ url_for('netpulse.update_device', device_id=device.id, **view.params) }}">
+  {{ device_fields(form) }}
+  {# Plan section 20: only devices that would not make a loop are listed. #}
+  <label>Connected through
+    <select name="parent" id="field-parent"{{ invalid(form, "parent") }}>
+      <option value=""{% if not form.parent %} selected{% endif %}>None: NetPulse places it</option>
+      {% for choice in choices %}
+      <option value="{{ choice.id }}"{% if form.parent == choice.id|string %} selected{% endif %}>{{ choice.name }} · {{ choice.host }}</option>
+      {% endfor %}
+    </select>
+    {{ field_error(form, "parent") }}
+  </label>
+  <p class="hint">
+    Changing the host keeps this device's history. To start a clean history,
+    delete the device and add it again.
+  </p>
+  <p class="hint">
+    Connected through is what this device sits behind, such as a switch. The map draws it as a dotted
+    line in place of its own guess, except for the gateway, whose place Windows reports.
+  </p>
+  <div class="form-actions">
+    <button type="submit" class="primary">Save</button>
+    <a class="button" href="{{ url_for('netpulse.dashboard', **view.params) }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

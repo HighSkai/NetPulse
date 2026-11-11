@@ -1,0 +1,79 @@
+[project]
+name = "netpulse"
+version = "1.0.0"
+description = "Local network monitor for Windows: ICMP checks, history, and a dashboard."
+readme = "README.md"
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+dependencies = ["flask>=3.1"]
+keywords = ["network-monitoring", "ping", "icmp", "flask", "windows", "packet-capture", "traceroute"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Web Environment",
+    "Framework :: Flask",
+    "Intended Audience :: System Administrators",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: System :: Monitoring",
+    "Topic :: System :: Networking :: Monitoring",
+]
+
+[project.urls]
+Homepage = "https://github.com/HighSkai/NetPulse"
+Issues = "https://github.com/HighSkai/NetPulse/issues"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "coverage>=7.6", "ruff>=0.15"]
+
+[project.scripts]
+netpulse = "netpulse.__main__:main"
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"netpulse.web" = ["templates/*.html", "static/*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+# Offline by default; `pytest -m integration` runs the real-Windows tests instead.
+# `external` tests contact a third party and run only when asked for by name: `pytest -m external`.
+addopts = "-q --strict-markers -m 'not integration and not external'"
+markers = [
+    "integration: real ping.exe and IcmpSendEcho to 127.0.0.1, and a real PowerShell network read (Windows only, never in CI)",
+    "external: contacts a third-party service over the internet (never by default, never with -m integration, never in CI)",
+]
+
+# Dev-only lint (decision 005), run in CI next to the tests.
+[tool.ruff]
+target-version = "py311"
+line-length = 110
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+# pycodestyle, pyflakes, import order, bugbear and pyupgrade. Line length is left
+# to review: long lines here are tables and SQL, not tangled code.
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E501"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["netpulse.domain.Thresholds", "netpulse.traffic.CaptureLimits"]
+
+[tool.coverage.run]
+source = ["netpulse"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+# Floor, not a target. Windows-only and POSIX-only branches each miss a few
+# lines depending on which OS runs the suite.
+fail_under = 95
+exclude_also = ['if __name__ == "__main__":']

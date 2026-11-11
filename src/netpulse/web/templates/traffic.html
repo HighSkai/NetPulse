@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% from "_macros.html" import prompt %}
+{% set active_tab = "traffic" %}
+
+{% block title %}Traffic · NetPulse{% endblock %}
+
+{% block head %}
+  {# Plan section 29: uPlot, pinned by hash as on the device page, draws the rate graph. #}
+  <link rel="stylesheet" href="{{ url_for('static', filename='uPlot-1.6.32.min.css') }}"
+        integrity="sha384-IfV0B7MIOYuO95kO9G5ySKPz/85zqFNOAs8iy4tkK5zd9izhJAB8b7lHrwYqqmYE">
+  <script src="{{ url_for('static', filename='uPlot-1.6.32.iife.min.js') }}"
+          integrity="sha384-Gx3t0zdBAuQOuvvmaLZj7HKEiSgWTAs+VdtNY7wt19QDPTDQjFIwAuXDj0zeN00c" defer></script>
+  <script src="{{ url_for('static', filename='traffic.js') }}" defer></script>
+{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    {{ prompt("Traffic", "traffic") }}
+    <p class="dim">See this PC's packets as they pass: who it talks to, over what, and how much.</p>
+  </div>
+</div>
+
+{% for message in get_flashed_messages() %}
+  <p class="saved" role="status">{{ message }}</p>
+{% endfor %}
+
+{% include "_traffic_view.html" %}
+
+<section aria-labelledby="captures-heading">
+  <h2 id="captures-heading">Captures ({{ captures|length }})</h2>
+  <p class="hint">
+    NetPulse keeps the last 50 captures, or every capture from the last 30 days, whichever keeps more.
+    Their files stay on this PC and open in Wireshark.
+  </p>
+  <div class="table-wrap">
+    <table class="captures">
+      <thead>
+        <tr>
+          <th scope="col">Started</th>
+          <th scope="col">Interface</th>
+          <th scope="col" class="col-optional">Filter</th>
+          <th scope="col" class="num">Packets</th>
+          <th scope="col" class="num">On the wire</th>
+          <th scope="col">Ended</th>
+          <th scope="col"><span class="visually-hidden">File</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {%- for capture in captures %}
+        <tr>
+          <td><a href="{{ url_for('netpulse.capture_detail', capture_id=capture.id) }}">{{ capture.started_at|localtime }}</a></td>
+          <td class="cut" title="{{ capture.description or capture.interface }}">{{ capture.description or capture.interface }}</td>
+          <td class="col-optional">{% if capture.filter %}<code>{{ capture.filter }}</code>{% else %}everything{% endif %}</td>
+          <td class="num">{{ "{:,}".format(capture.packets) }}</td>
+          <td class="num">{{ capture.bytes|bytes }}</td>
+          <td>
+            {%- if capture.state == "running" %}<span class="state state-up"><span class="glyph" aria-hidden="true">◉</span> Running</span>
+            {%- elif capture.state == "failed" %}<span class="state state-down"><span class="glyph" aria-hidden="true">✕</span> Failed</span>
+            {%- elif capture.state == "limit" %}At a limit
+            {%- elif capture.state == "interrupted" %}Interrupted
+            {%- else %}Stopped{% endif %}
+          </td>
+          <td class="actions"><a href="{{ url_for('netpulse.capture_download', capture_id=capture.id) }}">PCAP</a></td>
+        </tr>
+        {%- else %}
+        <tr class="empty"><td colspan="7">No captures yet.</td></tr>
+        {%- endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,28 @@
+{# Monitoring status bar (plan section 13): is the check loop running, and when
+   did it last finish a round? It reads the in-memory heartbeat, never the
+   database, so it can poll more often than the device table. Plan section 25:
+   while checks run, its dot pulses, and it says how many devices answered. On
+   a phone the parts marked status-extra are left out, to keep it short.
+   Plan section 28: while a capture runs, it says so too, from memory.
+
+   No live region: the age changes on every poll, and announcing it every few
+   seconds would drown out everything else for screen-reader users. #}
+{%- set monitor = monitor_status() %}
+<div id="monitor-status" class="monitor-status monitor-{{ monitor.state }}"
+     hx-get="{{ url_for('netpulse.status_bar') }}" hx-trigger="every {{ status_refresh_s }}s" hx-swap="outerHTML">
+  {%- if monitor.state == "running" %}
+  <span class="glyph live-dot" aria-hidden="true">●</span> Monitoring is running<span class="status-extra"> · last round {{ monitor.last_round_age_s|age }} ago</span> · {{ monitor.up }} of {{ monitor.devices }} {{ "device" if monitor.devices == 1 else "devices" }} up<span class="status-extra"> · every {{ refresh_s }} s</span>
+  {%- elif monitor.state == "starting" %}
+  <span class="glyph" aria-hidden="true">○</span> Monitoring is starting · waiting for the first round to finish
+  {%- elif monitor.state == "late" %}
+  <span class="glyph" aria-hidden="true">▲</span> Monitoring is late · last round {{ monitor.last_round_age_s|age }} ago, expected every {{ refresh_s }} s
+  {%- elif monitor.state == "failing" %}
+  <span class="glyph" aria-hidden="true">✕</span> Monitoring is failing · {{ monitor.error }}
+  {%- else %}
+  <span class="glyph" aria-hidden="true">✕</span> Monitoring is not running · statuses are not being updated
+  {%- endif %}
+  {%- set capturing = capture_status() %}
+  {%- if capturing.running %}
+  <span class="capture-state"> · <span class="glyph" aria-hidden="true">◉</span> <a href="{{ url_for('netpulse.traffic') }}">capturing</a> · {{ "{:,}".format(capturing.packets) }} {{ "packet" if capturing.packets == 1 else "packets" }}</span>
+  {%- endif %}
+</div>

@@ -1,0 +1,219 @@
+{% extends "base.html" %}
+{% from "_macros.html" import prompt, row_status, status_label %}
+{% set active_tab = "devices" %}
+
+{% block title %}{{ device.name }} · NetPulse{% endblock %}
+
+{% block head %}
+  {# Plan section 17: uPlot ships with NetPulse, pinned by hash, and only this page loads it. #}
+  <link rel="stylesheet" href="{{ url_for('static', filename='uPlot-1.6.32.min.css') }}"
+        integrity="sha384-IfV0B7MIOYuO95kO9G5ySKPz/85zqFNOAs8iy4tkK5zd9izhJAB8b7lHrwYqqmYE">
+  <script src="{{ url_for('static', filename='uPlot-1.6.32.iife.min.js') }}"
+          integrity="sha384-Gx3t0zdBAuQOuvvmaLZj7HKEiSgWTAs+VdtNY7wt19QDPTDQjFIwAuXDj0zeN00c" defer></script>
+  <script src="{{ url_for('static', filename='charts.js') }}" defer></script>
+{% endblock %}
+
+{% block content %}
+{#- Plan section 32: Back returns to the table as it was left (plan section 16). #}
+<p><a href="{{ url_for('netpulse.dashboard', **view.params) }}">&larr; All devices</a></p>
+<div class="page-head">
+  <div>
+    {{ prompt(device.name, "device", target=device.name) }}
+    <p class="dim">{{ device.host }}</p>
+  </div>
+  <div class="form-actions">
+    <form method="post" action="{{ url_for('netpulse.check_device', device_id=device.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="return" value="device">
+      {%- for key, value in view.params.items() %}
+      <input type="hidden" name="{{ key }}" value="{{ value }}">
+      {%- endfor %}
+      <button type="submit">Check now</button>
+    </form>
+    {#- Plan section 30: trace the path to it. #}
+    <form method="post" action="{{ url_for('netpulse.start_trace') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="target" value="{{ device.host }}">
+      <button type="submit">Trace</button>
+    </form>
+    <a class="button" href="{{ url_for('netpulse.edit_device', device_id=device.id, **view.params) }}">Edit</a>
+  </div>
+</div>
+
+{% set latest = row.status.latest %}
+<section class="summary facts" aria-label="Facts">
+  <div class="stat stat-wide">
+    <span class="stat-value">{% if row.state == "degraded" %}{{ row_status(row) }}{% else %}{{ status_label(latest) }}{% endif %}</span>
+    <span class="stat-label">status</span>
+  </div>
+  <div class="stat">
+    <span class="stat-value stat-small">{{ latest.checked_at|localtime if latest else "never" }}</span>
+    <span class="stat-label">last checked</span>
+  </div>
+  <div class="stat">
+    <span class="stat-value stat-small">{{ last_up.checked_at|localtime if last_up else "never" }}</span>
+    <span class="stat-label">last up</span>
+  </div>
+  <div class="stat">
+    <span class="stat-value stat-small">{{ device.created_at|localtime }}</span>
+    <span class="stat-label">added</span>
+  </div>
+  {% if parent %}
+  <div class="stat">
+    <span class="stat-value stat-small"><a href="{{ url_for('netpulse.device_detail', device_id=parent.id) }}">{{ parent.name }}</a></span>
+    <span class="stat-label">connects through</span>
+  </div>
+  {% endif %}
+  {% for label, share in availability %}
+  <div class="stat">
+    <span class="stat-value">{{ share|percent }}</span>
+    <span class="stat-label">checks up, {{ label }}</span>
+  </div>
+  {% endfor %}
+</section>
+
+{# Plan section 18: say why, next to the threshold that was crossed. #}
+{% if row.state == "degraded" %}
+<div class="notice" role="note">
+  <p><strong><span aria-hidden="true">▲</span> Degraded.</strong> The device answers, but:</p>
+  <ul>
+    {% if "slow" in row.degraded_by %}
+      <li>its successful checks among the last {{ row.recent.checks }} averaged {{ row.recent.avg_ms|ms }}, above the {{ thresholds.latency_ms }} ms threshold.</li>
+    {% endif %}
+    {% if "failing" in row.degraded_by %}
+      <li>{{ row.recent.failures }} of its last {{ row.recent.checks }} checks failed, and {{ thresholds.failures }} or more count as degraded.</li>
+    {% endif %}
+  </ul>
+  <p><a href="{{ url_for('netpulse.settings') }}">Change the thresholds</a></p>
+</div>
+{% endif %}
+
+{# Range links swap only this section with HTMX; without it they load the page. #}
+<section id="device-charts" aria-labelledby="history-heading">
+  <h2 id="history-heading">History</h2>
+  <nav class="ranges" aria-label="Range"
+       hx-boost="true" hx-target="#device-charts" hx-select="#device-charts" hx-swap="outerHTML">
+    {% for r in ranges %}
+      <a href="{{ url_for('netpulse.device_detail', device_id=device.id, range=r.key, **view.params) }}"
+         {%- if r.key == series.range.key %} aria-current="page"{% endif %}>{{ r.label }}</a>
+    {% endfor %}
+  </nav>
+
+  {% set total = series.availability %}
+  <p class="chart-summary">
+    {%- if total.checks %}
+      Last {{ series.range.label }}: {{ total.successes }} of {{ total.checks }} checks up ({{ total|percent }}).
+      {% if series.avg_ms is not none %}Latency averaged {{ series.avg_ms|ms }}, from {{ series.rtt_min|ms }} to {{ series.rtt_max|ms }}.{% endif %}
+      {% if series.no_data %}No data in {{ series.no_data }} of {{ series.periods|length }} periods.{% endif %}
+    {%- else %}
+      No checks in the last {{ series.range.label }}.
+    {%- endif -%}
+  </p>
+  <p class="hint">Each point is {{ series.range.period.total_seconds()|int|duration }}. Times are local.</p>
+
+  <h3>Latency</h3>
+  <div class="chart" data-latency-chart="latency-data">
+    <p class="hint">The chart needs JavaScript. The same numbers are under "Show data".</p>
+  </div>
+  <script type="application/json" id="latency-data">{{ series.chart_data()|tojson }}</script>
+
+  <h3>Checks up</h3>
+  {# Height is the share of checks up, so colour is never the only signal.
+     Hidden from screen readers: the summary above and the table below say the same. #}
+  <div class="bars" aria-hidden="true">
+    {%- for p in series.periods %}
+      {%- set share = 100 if p.state == "none" else [p.availability.percent|round|int, 4]|max %}
+      <span class="bar bar-{{ p.state }}" style="--share: {{ share }}"
+            title="{{ p.start.isoformat()|localtime }} · {% if p.checks %}{{ p.successes }} of {{ p.checks }} checks up{% else %}no data{% endif %}"></span>
+    {%- endfor %}
+  </div>
+  <p class="legend">
+    <span class="swatch bar-up"></span> all up
+    <span class="swatch bar-partial"></span> some failed
+    <span class="swatch bar-down"></span> all failed
+    <span class="swatch bar-none"></span> no data: monitoring was not running
+  </p>
+
+  <details>
+    <summary>Show data</summary>
+    <div class="table-wrap">
+      <table class="series">
+        <thead>
+          <tr>
+            <th scope="col">From</th>
+            <th scope="col" class="num">Checks</th>
+            <th scope="col" class="num">Up</th>
+            <th scope="col" class="num">Lowest</th>
+            <th scope="col" class="num">Average</th>
+            <th scope="col" class="num">Highest</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in series.periods %}
+            <tr>
+              <td>{{ p.start.isoformat()|localtime }}</td>
+              {% if p.checks %}
+                <td class="num">{{ p.checks }}</td>
+                <td class="num">{{ p.availability|percent }}</td>
+                <td class="num">{{ p.rtt_min|ms }}</td>
+                <td class="num">{{ p.avg_ms|ms }}</td>
+                <td class="num">{{ p.rtt_max|ms }}</td>
+              {% else %}
+                <td colspan="5" class="hint">no data</td>
+              {% endif %}
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+</section>
+
+<section aria-labelledby="outages-heading">
+  <h2 id="outages-heading">Outages</h2>
+  <p class="hint">An outage starts at the first of {{ down_after }} failed checks in a row and ends at the next success.</p>
+  <div class="table-wrap">
+    <table class="outages">
+      <thead>
+        <tr>
+          <th scope="col">Started</th>
+          <th scope="col">Ended</th>
+          <th scope="col" class="num">Lasted</th>
+          <th scope="col">Reason</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for outage in outages %}
+          <tr>
+            <td>{{ outage.start|localtime }}</td>
+            <td>{% if outage.end %}{{ outage.end|localtime }}{% else %}<span class="state state-down">ongoing</span>{% endif %}</td>
+            <td class="num">{{ outage.seconds(now)|duration }}</td>
+            <td>{{ outage.error|error_label }}</td>
+          </tr>
+        {% else %}
+          <tr class="empty"><td colspan="4">No outages recorded.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section aria-labelledby="recent-heading">
+  <h2 id="recent-heading">Recent checks</h2>
+  <div class="table-wrap">
+    <table class="history">
+      <thead>
+        <tr><th scope="col">Checked</th><th scope="col">Result</th></tr>
+      </thead>
+      <tbody>
+        {% for result in history %}
+          <tr><td>{{ result.checked_at|localtime }}</td><td>{{ status_label(result) }}</td></tr>
+        {% else %}
+          <tr class="empty"><td colspan="2">No checks yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if history|length == limit %}<p class="hint">Showing the latest {{ limit }} checks.</p>{% endif %}
+</section>
+{% endblock %}
