@@ -43,9 +43,10 @@ coverage.xml
 *.pem
 *.key
 
-# --- Kept locally: documentation, screenshots, planning notes and CI ---
-# The repository holds only what NetPulse needs to run.
-docs/
+# --- Kept locally: documentation, planning notes and CI ---
+# The repository holds what NetPulse needs to run, plus the README's screenshots.
+docs/*
+!docs/assets/
 .github/
 
 # --- Editors, AI tooling and operating systems ---

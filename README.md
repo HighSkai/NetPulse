@@ -15,6 +15,8 @@ NetPulse runs on one Windows PC and checks the devices on your network every 30 
 
 It needs no cloud account and sends no telemetry. Every script, style and font ships with it.
 
+![NetPulse overview: device counts, problems, breakdown charts, slowest devices, recent events and the 24-hour status grid](docs/assets/overview.png)
+
 ## Features
 
 **Monitoring**
@@ -48,6 +50,16 @@ It needs no cloud account and sends no telemetry. Every script, style and font s
 - Administrator and viewer accounts, with permissions you can grant, a list of active sessions and an audit log.
 - Access from any device on your network over HTTPS.
 - Works on phones and without JavaScript. Light and dark themes, and reduced motion is respected.
+
+## Screenshots
+
+These come from a demo with made-up devices, not a real network.
+
+| Device page | Network map |
+| --- | --- |
+| ![Device page with status, inventory details, a 24-hour latency chart and availability bars](docs/assets/device.png) | ![Network map from this PC through the router and switches to every device](docs/assets/map.png) |
+| **Devices** | **Alerts** |
+| ![Device table with search, filters, groups, tags and status](docs/assets/devices.png) | ![Alerts page with an open alert, past alerts and the notifications sent](docs/assets/alerts.png) |
 
 ## Requirements
 
