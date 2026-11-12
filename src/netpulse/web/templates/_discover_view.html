@@ -49,13 +49,15 @@
         <tr id="host-{{ host.id }}">
           {{ host_cells(host) }}
           <td class="actions">
+            {%- set hint = guess(host.name) %}
+            {%- if hint and not monitored %}<span class="detail" title="A guess from its name, not a fact">perhaps a {{ kinds[hint]|lower }}</span>{% endif %}
             {% if monitored %}
               Monitored as <a class="name-cut" href="{{ url_for('netpulse.device_detail', device_id=monitored.id) }}" title="{{ monitored.name }}">{{ monitored.name }}</a>
-              {{ action(host, "accept", "Link") }}
-            {% else %}
+              {% if can(Permission.DEVICES_MANAGE) %}{{ action(host, "accept", "Link") }}{% endif %}
+            {% elif can(Permission.DEVICES_MANAGE) %}
               {{ action(host, "accept", "Accept", primary=True) }}
             {% endif %}
-            {{ action(host, "ignore", "Ignore") }}
+            {% if can(Permission.DEVICES_MANAGE) %}{{ action(host, "ignore", "Ignore") }}{% endif %}
           </td>
         </tr>
         {% endfor %}
@@ -63,7 +65,8 @@
     </table>
   </div>
   {% if new|rejectattr("0.answers_ping")|list %}
-  <p class="hint">ARP only: the device answered Windows' address lookup but not ping. Monitoring it with ping would show it as Down.</p>
+  <p class="hint">ARP only: the device answered Windows' address lookup but not ping. Monitoring it with ping would show it as Down;
+    after accepting it, set its check to a TCP port it listens on, on its edit page.</p>
   {% endif %}
   {% else %}
   <p class="dim">Nothing new to review.{% if not (accepted or ignored) %} Sweep a subnet to find devices.{% endif %}</p>
@@ -81,8 +84,8 @@
           <td>
             {% if device %}<a class="name-cut" href="{{ url_for('netpulse.device_detail', device_id=device.id) }}" title="{{ device.name }}">{{ device.name }}</a>
               {%- if device.host != host.address|string %}
-              <span class="moved" role="note">{{ device.name }} pings {{ device.host }}, but this device is now at {{ host.address }}.
-                <a href="{{ url_for('netpulse.edit_device', device_id=device.id) }}">Edit</a></span>
+              <span class="moved" role="note">{{ device.name }} checks {{ device.host }}, but this device is now at {{ host.address }}.
+                {% if can(Permission.DEVICES_MANAGE) %}<a href="{{ url_for('netpulse.edit_device', device_id=device.id) }}">Edit</a>{% endif %}</span>
               {%- endif %}
             {% endif %}
           </td>
@@ -103,7 +106,7 @@
           {% for host in ignored %}
           <tr id="host-{{ host.id }}">
             {{ host_cells(host) }}
-            <td class="actions">{{ action(host, "restore", "Review again") }}</td>
+            <td class="actions">{% if can(Permission.DEVICES_MANAGE) %}{{ action(host, "restore", "Review again") }}{% endif %}</td>
           </tr>
           {% endfor %}
         </tbody>

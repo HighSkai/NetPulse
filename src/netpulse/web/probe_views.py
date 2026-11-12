@@ -13,13 +13,15 @@ from dataclasses import dataclass
 
 from flask import Response, abort, redirect, render_template, request, url_for
 
+from netpulse.accounts import Permission
 from netpulse.charts import Slice, donut
 from netpulse.domain import Trace
 from netpulse.outside import KEEP_ANSWER, NotConsented, OutsideState
 from netpulse.probes.globalping import CONTINENTS, MAX_PROBES, CheckRequest, OutsideCheck, Where
 from netpulse.trace import MAX_HOPS, PROBES_PER_HOP, ROUNDS, TraceState
-from netpulse.web.app import get_outside, get_store, get_tracer
+from netpulse.web.app import audit, get_outside, get_store, get_tracer
 from netpulse.web.forms import Refusable
+from netpulse.web.security import SIGNED_IN, access
 from netpulse.web.views import bp
 
 HISTORY = 20  # past traces listed on the page
@@ -41,12 +43,14 @@ class TraceForm(Refusable):
 
 
 @bp.get("/probe")
+@access(SIGNED_IN)
 def probe():
     """The Path tab: a target to trace, the newest or chosen trace, and past ones. ?target= fills the form."""
     return _probe_page(TraceForm.from_values(request.args))
 
 
 @bp.get("/probe/view")
+@access(SIGNED_IN)
 def probe_view():
     """The trace in progress, or the one just finished. Polls itself every second while a trace runs.
 
@@ -60,6 +64,7 @@ def probe_view():
 
 
 @bp.post("/probe/trace")
+@access(Permission.DIAGNOSTICS_RUN)
 def start_trace():
     form = TraceForm.from_values(request.form)
     tracer = get_tracer()
@@ -75,6 +80,7 @@ def start_trace():
 
 
 @bp.get("/probe/traces/<int:trace_id>")
+@access(SIGNED_IN)
 def trace_detail(trace_id: int):
     """A finished trace: its hops and its chain."""
     try:
@@ -154,12 +160,14 @@ class OutsideForm(Refusable):
 
 
 @bp.get("/probe/outside")
+@access(SIGNED_IN)
 def outside():
     """Whether a server can be reached from outside this network: consent first, then checks."""
     return _outside_page(OutsideForm.from_values(request.args))
 
 
 @bp.get("/probe/outside/view")
+@access(SIGNED_IN)
 def outside_view():
     """The check in progress, or the one just finished. Polls itself every second while one runs."""
     view = _outside_view(OutsideForm())
@@ -170,16 +178,20 @@ def outside_view():
 
 
 @bp.post("/probe/outside/consent")
+@access(Permission.SETTINGS_MANAGE)
 def outside_consent():
     """Agree to send targets to Globalping, or take it back. Nothing is sent before agreeing."""
     checker = get_outside()
     if checker is None:
         abort(503, description="Checks from outside are off in this NetPulse.")
-    checker.consent(request.form.get("agree") == "yes")
+    agreed = request.form.get("agree") == "yes"
+    checker.consent(agreed)
+    audit("agreed to checks from outside" if agreed else "withdrew agreement to checks from outside")
     return redirect(url_for(".outside"))
 
 
 @bp.post("/probe/outside/check")
+@access(Permission.OUTSIDE_RUN)
 def start_outside_check():
     form = OutsideForm.from_values(request.form)
     checker = get_outside()
@@ -193,10 +205,12 @@ def start_outside_check():
         return _outside_page(form.fail(exc)), 422
     if not started:
         return _outside_page(form.fail(ValueError("a check is already running. Wait for it to finish"))), 409
+    audit("checked from outside", form.target, form.kind)
     return redirect(url_for(".outside"))
 
 
 @bp.get("/probe/outside/checks/<int:check_id>")
+@access(SIGNED_IN)
 def outside_check(check_id: int):
     """A past check from outside."""
     try:

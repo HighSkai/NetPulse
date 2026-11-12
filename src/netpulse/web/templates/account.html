@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf, error_summary, field_error, invalid, prompt, settings_tabs %}
+{% set active_tab = "settings" %}
+
+{% block title %}Account · NetPulse{% endblock %}
+
+{% block content %}
+{{ prompt("Account", "account", target=user.username) }}
+{% if not user.must_change_password %}{{ settings_tabs("account") }}{% endif %}
+
+{% if user.must_change_password %}
+<div class="notice" role="note">
+  <p><strong>Choose your own password.</strong> You signed in with a temporary one. The rest of NetPulse opens once you have changed it.</p>
+</div>
+{% endif %}
+
+<section class="summary facts" aria-label="Account">
+  <div class="stat">
+    <span class="stat-value stat-small">{{ user.username }}</span>
+    <span class="stat-label">signed in as</span>
+  </div>
+  <div class="stat">
+    <span class="stat-value stat-small">{{ user.role_label }}</span>
+    <span class="stat-label">role</span>
+  </div>
+  <div class="stat">
+    <span class="stat-value stat-small">{{ user.password_changed_at|localtime }}</span>
+    <span class="stat-label">password changed</span>
+  </div>
+</section>
+
+<section aria-labelledby="may-heading">
+  <h2 id="may-heading">What this account may do</h2>
+  {%- if user.is_admin %}
+  <p>Everything: devices, settings, network access, alerts, packet captures and other people's accounts.</p>
+  {%- else %}
+  <p>Look at every page except packet captures, and change nothing{% if user.permissions %}, apart from:{% else %}.{% endif %}</p>
+  {%- if user.permissions %}
+  <ul class="fixed">
+    {%- for key, label in grantable.items() if key in user.permissions %}
+    <li>{{ label }}</li>
+    {%- endfor %}
+  </ul>
+  {%- endif %}
+  <p class="hint">An administrator can change this.</p>
+  {%- endif %}
+</section>
+
+<section aria-labelledby="password-heading">
+  <h2 id="password-heading">Change password</h2>
+  <form class="device-form stack" method="post" action="{{ url_for('netpulse.change_password') }}">
+    {{ csrf() }}
+    {{ error_summary(form) }}
+    {# For the browser's password manager, which wants to know whose password this is. #}
+    <input type="text" name="username" value="{{ user.username }}" autocomplete="username" hidden>
+    <label>Current password
+      <input name="current" type="password" id="field-current" required maxlength="256" autocomplete="current-password"{{ invalid(form, "current") }}>
+      {{ field_error(form, "current") }}
+    </label>
+    <label>New password
+      <input name="password" type="password" id="field-password" required minlength="{{ password_min }}" maxlength="256"
+             autocomplete="new-password"{{ invalid(form, "password") }}>
+      {{ field_error(form, "password") }}
+      <span class="hint">At least {{ password_min }} characters.</span>
+    </label>
+    <label>New password again
+      <input name="confirm" type="password" id="field-confirm" required maxlength="256" autocomplete="new-password"{{ invalid(form, "confirm") }}>
+      {{ field_error(form, "confirm") }}
+    </label>
+    <div class="form-actions"><button type="submit" class="primary">Change password</button></div>
+    <p class="hint">Changing it signs out every other browser this account is signed in on.</p>
+  </form>
+</section>
+
+<section aria-labelledby="sessions-heading">
+  <h2 id="sessions-heading">Signed-in browsers ({{ sessions|length }})</h2>
+  <p class="hint">A session ends after {{ idle_days }} days without use, and {{ absolute_days }} days after signing in at the latest.</p>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th scope="col">Signed in</th><th scope="col">Last used</th><th scope="col">From</th><th scope="col" class="col-optional">Browser</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr>
+      </thead>
+      <tbody>
+        {%- for s in sessions %}
+        <tr>
+          <td>{{ s.created_at|localtime }}</td>
+          <td>{{ s.last_seen_at|localtime }}{% if s.id == current.id %} <span class="tag">this browser</span>{% endif %}</td>
+          <td>{{ s.ip or "—" }}</td>
+          <td class="col-optional cut" title="{{ s.user_agent }}">{{ s.user_agent or "—" }}</td>
+          <td class="actions">
+            <form method="post" action="{{ url_for('netpulse.revoke_own_session', session_id=s.id) }}">
+              {{ csrf() }}
+              <button type="submit">{{ "Sign out" if s.id == current.id else "Sign it out" }}</button>
+            </form>
+          </td>
+        </tr>
+        {%- endfor %}
+      </tbody>
+    </table>
+  </div>
+  {%- if sessions|length > 1 %}
+  <form class="below" method="post" action="{{ url_for('netpulse.revoke_other_sessions') }}">
+    {{ csrf() }}
+    <button type="submit">Sign out every other browser</button>
+  </form>
+  {%- endif %}
+</section>
+{% endblock %}

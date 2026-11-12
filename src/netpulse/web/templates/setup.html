@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% from "_macros.html" import error_summary, field_error, invalid, prompt %}
+
+{% block title %}Set up · NetPulse{% endblock %}
+
+{# Plan section 37: the first run. Served only to the PC NetPulse runs on, and
+   only until the first administrator exists. #}
+{% block content %}
+<div class="gate gate-wide">
+  {{ prompt("Set up NetPulse", "setup") }}
+  <ol class="steps" aria-label="Setup steps">
+    <li aria-current="step"><strong>1</strong> Create the administrator</li>
+    <li><strong>2</strong> Choose who can reach NetPulse</li>
+    <li><strong>3</strong> Add your devices</li>
+  </ol>
+  <p class="dim">
+    NetPulse has no built-in account and no default password. The account you make here may do everything:
+    add devices, change settings, and make accounts for other people.
+  </p>
+  <form class="device-form stack" method="post" action="{{ url_for('netpulse.finish_setup') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {{ error_summary(form) }}
+    <label>Username
+      <input name="username" value="{{ form.username }}" id="field-username" required minlength="3" maxlength="32" autofocus
+             autocomplete="username" autocapitalize="off" spellcheck="false"{{ invalid(form, "username") }}>
+      {{ field_error(form, "username") }}
+      <span class="hint">3 to 32 letters, digits, dots, dashes or underscores.</span>
+    </label>
+    <label>Password
+      <input name="password" type="password" id="field-password" required minlength="{{ password_min }}" maxlength="256"
+             autocomplete="new-password"{{ invalid(form, "password") }}>
+      {{ field_error(form, "password") }}
+      <span class="hint">At least {{ password_min }} characters. A few words you can remember beat a short jumble.</span>
+    </label>
+    <label>Password again
+      <input name="confirm" type="password" id="field-confirm" required maxlength="256" autocomplete="new-password"{{ invalid(form, "confirm") }}>
+      {{ field_error(form, "confirm") }}
+    </label>
+    <div class="form-actions">
+      <button type="submit" class="primary">Create the administrator</button>
+    </div>
+  </form>
+  <p class="hint">
+    Until this is done NetPulse answers only on this PC, at 127.0.0.1. Monitoring already runs in the background.
+  </p>
+</div>
+{% endblock %}

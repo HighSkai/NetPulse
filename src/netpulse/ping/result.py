@@ -25,6 +25,16 @@ class Error:
         }
     )
 
+    # Each code in a few words, for pages and messages.
+    LABELS = {
+        TIMEOUT: "Timed out",
+        UNREACHABLE: "Unreachable",
+        NAME_RESOLUTION: "Unknown host",
+        TRANSMIT_FAILED: "Send failed",
+        TTL_EXPIRED: "TTL expired",
+        UNREADABLE_OUTPUT: "Unreadable ping output",
+    }
+
 
 @dataclass(frozen=True)
 class PingResult:

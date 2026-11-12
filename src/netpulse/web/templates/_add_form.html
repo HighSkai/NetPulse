@@ -1,7 +1,34 @@
-{% from "_macros.html" import device_fields %}
+{% from "_macros.html" import device_fields, field_error, invalid %}
+{# The short way to add a device: a name and a host are enough. Type, group and how
+   it is checked can be set here too; everything else is on the device's edit page. #}
 <form id="add-device" class="device-form" method="post" action="{{ url_for('netpulse.add_device') }}"
       hx-post="{{ url_for('netpulse.add_device') }}" hx-target="this" hx-swap="outerHTML"
       hx-disabled-elt="find button" hx-include="#device-filter">
   {{ device_fields(form) }}
+  {%- if added %}
+  <p class="saved" role="status">Added {{ added.name }}. Its first check runs within {{ refresh_s }} s.</p>
+  {%- endif %}
+  <label>Check by
+    <select name="check_kind" id="field-check_kind"{{ invalid(form, "check_kind") }}>
+      <option value="icmp"{% if form.check_kind == "icmp" %} selected{% endif %}>Ping</option>
+      <option value="tcp"{% if form.check_kind == "tcp" %} selected{% endif %}>TCP port</option>
+    </select>
+  </label>
+  <label>Port
+    <input name="check_port" value="{{ form.check_port }}" id="field-check_port" inputmode="numeric" maxlength="5"
+           placeholder="for TCP: 443"{{ invalid(form, "check_port") }}>
+    {{ field_error(form, "check_port") }}
+  </label>
+  {%- if groups %}
+  <label>Group
+    <select name="group" id="field-group">
+      <option value="">None</option>
+      {%- for group in groups %}
+      <option value="{{ group.id }}"{% if form.group == group.id|string %} selected{% endif %}>{{ group.name }}</option>
+      {%- endfor %}
+    </select>
+  </label>
+  {%- endif %}
   <button type="submit" class="primary">Add device</button>
+  <p class="hint">Ping suits most devices. Choose a TCP port for one that ignores ping, as Windows PCs and many cameras do: 80, 443, 22, 445…</p>
 </form>

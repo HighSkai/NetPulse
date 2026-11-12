@@ -12,9 +12,6 @@
   </div>
 </div>
 
-{% for message in get_flashed_messages() %}
-  <p class="saved" role="status">{{ message }}</p>
-{% endfor %}
 {% if form.error and not targets %}{{ error_summary(form) }}{% endif %}
 
 {% if network_error %}
@@ -26,6 +23,8 @@
 <div class="notice" role="note"><p>This NetPulse was started without a way to sweep.</p></div>
 {% elif not targets %}
 <p class="dim">This PC has no private subnet to sweep. Sweeps cover only 10.x, 172.16–31.x and 192.168.x networks.</p>
+{% elif not can(Permission.DISCOVERY_RUN) %}
+<p class="dim">Your account may look at what sweeps found, and not start one.</p>
 {% else %}
 {# Plan section 21: this PC's own private subnets only, at most 256 addresses. #}
 <form class="device-form sweep-form" method="post" action="{{ url_for('netpulse.start_sweep') }}">
@@ -54,6 +53,34 @@
     so devices that ignore pings show up too. It takes a few seconds.
   </p>
 </form>
+{#- Plan section 41: sweeps on a schedule, for one subnet, off unless an administrator turns them on. #}
+{%- if can(Permission.SETTINGS_MANAGE) %}
+<details class="schedule"{% if schedule %} open{% endif %}>
+  <summary>Sweep on a schedule: {{ "off" if not schedule else "every " ~ (schedule * 60)|duration ~ " on " ~ schedule_network }}</summary>
+  <form class="device-form" method="post" action="{{ url_for('netpulse.save_discovery_schedule') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>How often
+      <select name="every_min">
+        {%- for minutes in schedules %}
+        <option value="{{ minutes }}"{% if minutes == schedule %} selected{% endif %}>{{ "Never" if minutes == 0 else "Every " ~ (minutes * 60)|duration }}</option>
+        {%- endfor %}
+      </select>
+    </label>
+    <label>Subnet
+      <select name="network">
+        {%- for target in targets if not target.needs_confirmation %}
+        <option value="{{ target.network }}"{% if target.network|string == schedule_network %} selected{% endif %}>{{ target.network }} · {{ target.adapter }}</option>
+        {%- endfor %}
+      </select>
+    </label>
+    <div class="form-actions"><button type="submit" class="primary">Save</button></div>
+    <p class="hint">
+      A scheduled sweep runs only while this PC is still on that subnet, and never on a network Windows marks as Public.
+      Each device it has never seen before opens an alert, if that rule is on.
+    </p>
+  </form>
+</details>
+{%- endif %}
 {% endif %}
 
 {% include "_discover_view.html" %}

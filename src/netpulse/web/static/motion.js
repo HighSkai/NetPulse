@@ -5,6 +5,9 @@
 (function () {
   var KEY = "netpulse.motion";
   var root = document.documentElement;
+  // Says that scripts run, before the page is drawn: the stylesheet floats the
+  // messages about the last action only then (plan section 43).
+  root.classList.add("js");
 
   function stored() {
     try {

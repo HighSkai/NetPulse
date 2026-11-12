@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf, device_tabs, prompt %}
+{% set active_tab = "devices" %}
+
+{% block title %}Groups · NetPulse{% endblock %}
+
+{# Plan section 39: groups are how a large inventory is kept in order: by room, by rack, by purpose. #}
+{% block content %}
+{{ prompt("Groups", "devices", flags="--groups") }}
+{{ device_tabs("groups") }}
+{%- set manage = can(Permission.DEVICES_MANAGE) %}
+<p class="dim">A device is in one group or none. Put it in a group on its edit page, or name the group when you add it.</p>
+
+{% if error %}
+<div class="error-summary" role="alert"><strong>There is a problem.</strong> {{ error[:1]|upper }}{{ error[1:] }}.</div>
+{% endif %}
+
+<div class="table-wrap">
+  <table class="groups">
+    <thead><tr><th scope="col">Group</th><th scope="col" class="num">Devices</th>{% if manage %}<th scope="col">Rename</th><th scope="col"><span class="visually-hidden">Delete</span></th>{% endif %}</tr></thead>
+    <tbody>
+      {%- for group in groups %}
+      <tr>
+        <td><a href="{{ url_for('netpulse.dashboard', group=group.id) }}">{{ group.name }}</a></td>
+        <td class="num">{{ group.devices }}</td>
+        {%- if manage %}
+        <td>
+          <form class="inline-form" method="post" action="{{ url_for('netpulse.rename_group', group_id=group.id) }}">
+            {{ csrf() }}
+            <input name="name" value="{{ group.name }}" required maxlength="64" aria-label="New name for {{ group.name }}">
+            <button type="submit">Rename</button>
+          </form>
+        </td>
+        <td class="actions">
+          <form method="post" action="{{ url_for('netpulse.delete_group', group_id=group.id) }}"
+                data-confirm="Delete the group {{ group.name }}? Its {{ group.devices }} {{ 'device stays' if group.devices == 1 else 'devices stay' }}, in no group.">
+            {{ csrf() }}
+            <button type="submit" class="danger">Delete</button>
+          </form>
+        </td>
+        {%- endif %}
+      </tr>
+      {%- else %}
+      <tr class="empty"><td colspan="{{ 4 if manage else 2 }}">No groups yet.</td></tr>
+      {%- endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if manage %}
+<section aria-labelledby="add-group-heading">
+  <h2 id="add-group-heading">Add a group</h2>
+  <form class="device-form" method="post" action="{{ url_for('netpulse.add_group') }}">
+    {{ csrf() }}
+    <label>Name
+      <input name="name" required maxlength="64" placeholder="Living room, Rack 1, Cameras" autocomplete="off">
+    </label>
+    <div class="form-actions"><button type="submit" class="primary">Add group</button></div>
+  </form>
+</section>
+{% endif %}
+{% endblock %}

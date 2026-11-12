@@ -7,6 +7,7 @@ bottom of the layers: it imports nothing else from NetPulse.
 
 from __future__ import annotations
 
+import re
 import unicodedata
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -22,9 +23,49 @@ class ValidationError(ValueError):
     pass
 
 
+class DeviceKind:
+    """What a device is (plan section 39). The user says; NetPulse only suggests."""
+
+    UNKNOWN = "unknown"
+
+    LABELS = {
+        "router": "Router", "switch": "Switch", "access_point": "Access point", "firewall": "Firewall",
+        "server": "Server", "nas": "NAS", "vm": "Virtual machine", "desktop": "Desktop", "laptop": "Laptop",
+        "phone": "Phone", "tablet": "Tablet", "printer": "Printer", "camera": "Camera", "nvr": "NVR",
+        "tv": "TV or media player", "smart_home": "Smart home", "iot": "IoT device", "sbc": "Single-board computer",
+        "ups": "UPS or power", "appliance": "Network appliance", "service": "Online service", UNKNOWN: "Not set",
+    }
+    ALL = tuple(LABELS)
+
+
+class CheckKind:
+    """How a device is checked (plan section 40)."""
+
+    ICMP = "icmp"  # an echo: the device answers ping
+    TCP = "tcp"  # a TCP connection to one port: for devices that ignore ping
+
+    ALL = (ICMP, TCP)
+    LABELS = {ICMP: "Ping (ICMP echo)", TCP: "TCP port"}
+
+
+# Seconds between checks of one device. The loop runs every 30 s and checks the
+# devices that are due, so every choice is a multiple of it.
+CHECK_INTERVALS = (30, 60, 300, 900)
+DEFAULT_INTERVAL_S = 30
+TEXT_MAX_LEN = 64  # vendor, model, location, a group's name
+NOTES_MAX_LEN = 2000
+TAG_MAX_LEN = 32
+TAGS_MAX = 12
+
+
 @dataclass(frozen=True)
 class Device:
-    """A monitored host. deleted_at stays None while the device is live."""
+    """A monitored host. deleted_at stays None while the device is live.
+
+    Everything after deleted_at is inventory (plan section 39) and how the
+    device is checked (plan section 40); all of it has a default, so a device
+    is still just a name and a host.
+    """
 
     id: int
     name: str
@@ -32,10 +73,39 @@ class Device:
     created_at: str
     updated_at: str
     deleted_at: str | None
+    kind: str = DeviceKind.UNKNOWN
+    group_id: int | None = None
+    vendor: str = ""
+    model: str = ""
+    location: str = ""
+    notes: str = ""
+    mac: str | None = None  # AA-BB-CC-DD-EE-FF, as Windows writes it
+    paused: bool = False  # not checked, and never alerted on, until resumed
+    interval_s: int = DEFAULT_INTERVAL_S
+    check_kind: str = CheckKind.ICMP
+    check_port: int | None = None  # the TCP port, when check_kind is tcp
+    alerts_muted: bool = False
+    tags: tuple[str, ...] = ()
 
     @property
     def is_live(self) -> bool:
         return self.deleted_at is None
+
+    @property
+    def kind_label(self) -> str:
+        return DeviceKind.LABELS.get(self.kind, self.kind)
+
+    @property
+    def check_label(self) -> str:
+        """How it is checked, in a few words: "ping" or "TCP 443"."""
+        return f"TCP {self.check_port}" if self.check_kind == CheckKind.TCP else "ping"
+
+
+@dataclass(frozen=True)
+class DeviceGroup:
+    id: int
+    name: str
+    devices: int = 0  # live devices in it
 
 
 @dataclass(frozen=True)
@@ -62,6 +132,7 @@ class DeviceState:
     DEGRADED = "degraded"
     DOWN = "down"
     UNCHECKED = "unchecked"
+    PAUSED = "paused"  # plan section 40: not checked until resumed; a DeviceRow's state, like DEGRADED
 
 
 @dataclass(frozen=True)
@@ -152,6 +223,175 @@ def validate_name(name: str) -> str:
     if any(unicodedata.category(ch) == "Cc" for ch in trimmed):
         raise ValidationError("name must not contain control characters")
     return trimmed
+
+
+# Inventory (plan section 39)
+
+_MAC_SEPARATORS = str.maketrans("", "", ":-. ")
+
+
+def _clean_text(value: str | None, what: str, limit: int) -> str:
+    text = " ".join((value or "").split()) if limit <= TEXT_MAX_LEN else (value or "").strip()
+    if len(text) > limit:
+        raise ValidationError(f"{what} must be at most {limit} characters")
+    if any(unicodedata.category(ch) == "Cc" and ch not in "\n\r\t" for ch in text):
+        raise ValidationError(f"{what} must not contain control characters")
+    return text
+
+
+def validate_kind(kind: str | None) -> str:
+    kind = (kind or DeviceKind.UNKNOWN).strip().lower().replace(" ", "_").replace("-", "_")
+    if kind in DeviceKind.LABELS:
+        return kind
+    by_label = {label.casefold(): key for key, label in DeviceKind.LABELS.items()}
+    if kind.replace("_", " ") in by_label:  # an imported file may hold the label
+        return by_label[kind.replace("_", " ")]
+    raise ValidationError(f"type must be one of {', '.join(k for k in DeviceKind.ALL if k != DeviceKind.UNKNOWN)}")
+
+
+def validate_mac(mac: str | None) -> str | None:
+    """A MAC address as AA-BB-CC-DD-EE-FF, from any common way of writing one. Empty is None."""
+    text = (mac or "").strip()
+    if not text:
+        return None
+    digits = text.translate(_MAC_SEPARATORS).upper()
+    if len(digits) != 12 or any(ch not in "0123456789ABCDEF" for ch in digits):
+        raise ValidationError("MAC address must be six pairs of hex digits, such as AA-BB-CC-DD-EE-FF")
+    return "-".join(digits[i : i + 2] for i in range(0, 12, 2))
+
+
+def validate_tags(tags) -> tuple[str, ...]:
+    """Tags from a comma-separated field or a list: lower case, each once, in order."""
+    parts = tags.split(",") if isinstance(tags, str) else list(tags or ())
+    clean: list[str] = []
+    for part in parts:
+        tag = " ".join(str(part).split()).casefold()
+        if not tag:
+            continue
+        if len(tag) > TAG_MAX_LEN:
+            raise ValidationError(f"tags must be at most {TAG_MAX_LEN} characters each")
+        if any(unicodedata.category(ch) == "Cc" for ch in tag):
+            raise ValidationError("tags must not contain control characters")
+        if tag not in clean:
+            clean.append(tag)
+    if len(clean) > TAGS_MAX:
+        raise ValidationError(f"tags: at most {TAGS_MAX} on one device")
+    return tuple(clean)
+
+
+def validate_interval(value: str | int | None) -> int:
+    text = str(DEFAULT_INTERVAL_S if value in (None, "") else value).strip()
+    if not text.isdigit() or int(text) not in CHECK_INTERVALS:
+        raise ValidationError(f"interval must be one of {', '.join(map(str, CHECK_INTERVALS))} seconds")
+    return int(text)
+
+
+def validate_check(kind: str | None, port: str | int | None) -> tuple[str, int | None]:
+    """(check kind, port). A TCP check needs a port; a ping has none."""
+    kind = (kind or CheckKind.ICMP).strip().lower()
+    if kind in ("ping", ""):
+        kind = CheckKind.ICMP
+    if kind not in CheckKind.ALL:
+        raise ValidationError("check must be ping or a TCP port")
+    if kind == CheckKind.ICMP:
+        return kind, None
+    text = "" if port is None else str(port).strip()
+    if not text.isdigit() or not 1 <= int(text) <= 65535:
+        raise ValidationError("port must be a number from 1 to 65535 for a TCP check")
+    return kind, int(text)
+
+
+@dataclass(frozen=True)
+class Inventory:
+    """A device's inventory fields and check settings, validated together (plan section 39)."""
+
+    kind: str = DeviceKind.UNKNOWN
+    vendor: str = ""
+    model: str = ""
+    location: str = ""
+    notes: str = ""
+    mac: str | None = None
+    paused: bool = False
+    interval_s: int = DEFAULT_INTERVAL_S
+    check_kind: str = CheckKind.ICMP
+    check_port: int | None = None
+    alerts_muted: bool = False
+    tags: tuple[str, ...] = ()
+
+    @classmethod
+    def of(cls, values) -> Inventory:
+        """From form or file values, by field name. Missing fields take their defaults.
+
+        Raises ValidationError naming the field.
+        """
+        get = values.get
+        check_kind, check_port = validate_check(get("check_kind"), get("check_port"))
+        return cls(
+            kind=validate_kind(get("kind")),
+            vendor=_clean_text(get("vendor"), "vendor", TEXT_MAX_LEN),
+            model=_clean_text(get("model"), "model", TEXT_MAX_LEN),
+            location=_clean_text(get("location"), "location", TEXT_MAX_LEN),
+            notes=_clean_text(get("notes"), "notes", NOTES_MAX_LEN),
+            mac=validate_mac(get("mac")),
+            paused=_flag(get("paused")),
+            interval_s=validate_interval(get("interval_s")),
+            check_kind=check_kind,
+            check_port=check_port,
+            alerts_muted=_flag(get("alerts_muted")),
+            tags=validate_tags(get("tags") or ""),
+        )
+
+
+def _flag(value) -> bool:
+    return str(value or "").strip().lower() in ("1", "yes", "true", "on", "y")
+
+
+def validate_group_name(name: str | None) -> str:
+    text = _clean_text(name, "group name", TEXT_MAX_LEN)
+    if not text:
+        raise ValidationError("group name is required")
+    return text
+
+
+# Guesses at what a device is, from its name (plan section 39). Only ever a
+# suggestion the page marks as a guess: a name is not evidence of much.
+# (type, words found anywhere in the name, short words that must be a whole part of it).
+_KIND_HINTS: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = (
+    ("printer", ("printer", "laserjet", "officejet", "deskjet", "epson", "brother"), ()),
+    ("camera", ("camera", "doorbell", "reolink"), ("cam", "wyze", "arlo")),
+    ("nvr", (), ("nvr", "dvr")),
+    ("nas", ("synology", "diskstation", "truenas", "unraid"), ("nas", "qnap")),
+    ("tv", ("roku", "chromecast", "firetv", "appletv", "bravia"), ("tv",)),
+    ("phone", ("iphone", "android"), ("phone", "pixel", "galaxy")),
+    ("tablet", ("ipad", "tablet"), ()),
+    ("laptop", ("laptop", "macbook", "thinkpad", "notebook"), ()),
+    ("desktop", ("desktop", "workstation"), ("imac", "pc")),
+    ("sbc", ("raspberry", "pihole", "octopi"), ("rpi", "pi")),
+    ("smart_home", ("alexa", "homepod", "smartthings", "tasmota", "shelly"), ("echo", "nest", "hue", "myq", "esp")),
+    ("access_point", ("accesspoint", "unifi"), ("ap", "eero", "orbi", "deco")),
+    ("switch", ("switch",), ()),
+    ("router", ("router", "gateway", "fritz"), ()),
+    ("server", ("server", "proxmox"), ("srv", "esxi", "docker")),
+    ("ups", (), ("ups", "apc")),
+)
+_NAME_PARTS = re.compile(r"[^a-z0-9]+")
+
+
+def guess_kind(name: str | None) -> str | None:
+    """A device type suggested by a host or device name, or None. A guess, never a fact.
+
+    Only the first label of a host name is read, so a domain such as
+    home.arpa never decides the type.
+    """
+    text = (name or "").casefold().strip()
+    if not text or text.replace(".", "").isdigit():
+        return None
+    label = text.split(".", 1)[0]
+    parts = [part.rstrip("0123456789") for part in _NAME_PARTS.split(label) if part]
+    for kind, anywhere, whole in _KIND_HINTS:
+        if any(word in label for word in anywhere) or any(word in parts for word in whole):
+            return kind
+    return None
 
 
 # Degraded (plan section 18)

@@ -7,25 +7,110 @@
 {% block content %}
 <p><a href="{{ url_for('netpulse.dashboard', **view.params) }}">&larr; All devices</a></p>
 {{ prompt("Edit " ~ device.name, "device", target=device.name, flags="--edit") }}
-<form class="device-form" method="post" action="{{ url_for('netpulse.update_device', device_id=device.id, **view.params) }}">
-  {{ device_fields(form) }}
-  {# Plan section 20: only devices that would not make a loop are listed. #}
-  <label>Connected through
-    <select name="parent" id="field-parent"{{ invalid(form, "parent") }}>
-      <option value=""{% if not form.parent %} selected{% endif %}>None: NetPulse places it</option>
-      {% for choice in choices %}
-      <option value="{{ choice.id }}"{% if form.parent == choice.id|string %} selected{% endif %}>{{ choice.name }} · {{ choice.host }}</option>
-      {% endfor %}
-    </select>
-    {{ field_error(form, "parent") }}
-  </label>
+<form class="device-form edit-form" method="post" action="{{ url_for('netpulse.update_device', device_id=device.id, **view.params) }}">
+  {# Says that every inventory field below is in this form, so an unticked box means off. #}
+  <input type="hidden" name="inventory" value="yes">
+  <fieldset class="group">
+    <legend>What it is</legend>
+    {{ device_fields(form) }}
+    <label>Type
+      <select name="kind" id="field-kind"{{ invalid(form, "kind") }}>
+        {%- for value, label in kinds.items()|sort(attribute="1") %}
+        <option value="{{ value }}"{% if value == form.kind %} selected{% endif %}>{{ label }}</option>
+        {%- endfor %}
+      </select>
+      {{ field_error(form, "kind") }}
+      {%- if suggested %}<span class="hint">Going by its name, perhaps a {{ kinds[suggested]|lower }}. That is a guess; you decide.</span>{% endif %}
+    </label>
+    <label>Group
+      <select name="group" id="field-group">
+        <option value=""{% if not form.group %} selected{% endif %}>None</option>
+        {%- for group in groups %}
+        <option value="{{ group.id }}"{% if form.group == group.id|string %} selected{% endif %}>{{ group.name }}</option>
+        {%- endfor %}
+      </select>
+    </label>
+    <label>Or a new group
+      <input name="new_group" value="{{ form.new_group }}" id="field-new_group" maxlength="64" autocomplete="off"
+             placeholder="Rack 1"{{ invalid(form, "new_group") }}>
+      {{ field_error(form, "new_group") }}
+    </label>
+    <label>Tags
+      <input name="tags" value="{{ form.tags }}" id="field-tags" maxlength="400" autocomplete="off" autocapitalize="off"
+             placeholder="critical, upstairs"{{ invalid(form, "tags") }}>
+      {{ field_error(form, "tags") }}
+      <span class="hint">Separated by commas. Search and the Tag filter find them.</span>
+    </label>
+  </fieldset>
+
+  <fieldset class="group">
+    <legend>Details</legend>
+    <label>Vendor
+      <input name="vendor" value="{{ form.vendor }}" id="field-vendor" maxlength="64" autocomplete="off"{{ invalid(form, "vendor") }}>
+      {{ field_error(form, "vendor") }}
+    </label>
+    <label>Model
+      <input name="model" value="{{ form.model }}" id="field-model" maxlength="64" autocomplete="off"{{ invalid(form, "model") }}>
+      {{ field_error(form, "model") }}
+    </label>
+    <label>Location
+      <input name="location" value="{{ form.location }}" id="field-location" maxlength="64" autocomplete="off"
+             placeholder="Office, top shelf"{{ invalid(form, "location") }}>
+      {{ field_error(form, "location") }}
+    </label>
+    <label>MAC address
+      <input name="mac" value="{{ form.mac }}" id="field-mac" maxlength="17" autocomplete="off" spellcheck="false"
+             placeholder="AA-BB-CC-DD-EE-FF"{{ invalid(form, "mac") }}>
+      {{ field_error(form, "mac") }}
+    </label>
+    <label class="wide">Notes
+      <textarea name="notes" id="field-notes" rows="3" maxlength="2000"{{ invalid(form, "notes") }}>{{ form.notes }}</textarea>
+      {{ field_error(form, "notes") }}
+    </label>
+  </fieldset>
+
+  <fieldset class="group">
+    <legend>How it is checked</legend>
+    <label>Check by
+      <select name="check_kind" id="field-check_kind"{{ invalid(form, "check_kind") }}>
+        {%- for value, label in check_kinds.items() %}
+        <option value="{{ value }}"{% if value == form.check_kind %} selected{% endif %}>{{ label }}</option>
+        {%- endfor %}
+      </select>
+      {{ field_error(form, "check_kind") }}
+    </label>
+    <label>TCP port
+      <input name="check_port" value="{{ form.check_port }}" id="field-check_port" inputmode="numeric" maxlength="5"
+             placeholder="443"{{ invalid(form, "check_port") }}>
+      {{ field_error(form, "check_port") }}
+      <span class="hint">Only for a TCP check: a port the device listens on.</span>
+    </label>
+    <label>Every
+      <select name="interval_s" id="field-interval_s"{{ invalid(form, "interval_s") }}>
+        {%- for seconds in intervals %}
+        <option value="{{ seconds }}"{% if seconds|string == form.interval_s %} selected{% endif %}>{{ seconds|duration }}</option>
+        {%- endfor %}
+      </select>
+      <span class="hint">Longer is gentler on a small device. Outages are then noticed later, too.</span>
+    </label>
+    {# Plan section 20: only devices that would not make a loop are listed. #}
+    <label>Connected through
+      <select name="parent" id="field-parent"{{ invalid(form, "parent") }}>
+        <option value=""{% if not form.parent %} selected{% endif %}>None: NetPulse places it</option>
+        {% for choice in choices %}
+        <option value="{{ choice.id }}"{% if form.parent == choice.id|string %} selected{% endif %}>{{ choice.name }} · {{ choice.host }}</option>
+        {% endfor %}
+      </select>
+      {{ field_error(form, "parent") }}
+    </label>
+    <label class="check"><input type="checkbox" name="paused" value="yes"{% if form.paused %} checked{% endif %}> Paused: do not check it, and never alert on it</label>
+    <label class="check"><input type="checkbox" name="alerts_muted" value="yes"{% if form.alerts_muted %} checked{% endif %}> Keep checking it, but never alert on it</label>
+  </fieldset>
+
   <p class="hint">
-    Changing the host keeps this device's history. To start a clean history,
-    delete the device and add it again.
-  </p>
-  <p class="hint">
-    Connected through is what this device sits behind, such as a switch. The map draws it as a dotted
-    line in place of its own guess, except for the gateway, whose place Windows reports.
+    Changing the host keeps this device's history. To start a clean history, delete the device and add it again.
+    Connected through is what this device sits behind, such as a switch: the map draws it as a dotted line, and
+    when both go down together NetPulse names the switch as the likely cause.
   </p>
   <div class="form-actions">
     <button type="submit" class="primary">Save</button>

@@ -21,6 +21,12 @@
     <span class="stat-value"><span class="glyph" aria-hidden="true">○</span> {{ summary.unchecked }}</span>
     <span class="stat-label">not checked</span>
   </a>
+  {%- if summary.paused %}
+  <a class="stat stat-unknown" href="{{ url_for('netpulse.dashboard', status='paused') }}">
+    <span class="stat-value"><span class="glyph" aria-hidden="true">‖</span> {{ summary.paused }}</span>
+    <span class="stat-label">paused</span>
+  </a>
+  {%- endif %}
   <div class="stat">
     <span class="stat-value">{{ summary.median_latency_ms|ms }}</span>
     <span class="stat-label">median latency</span>

@@ -141,9 +141,15 @@
   document.addEventListener("DOMContentLoaded", refreshed);
   document.addEventListener("htmx:afterSettle", refreshed);
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", redraw);
-  window.addEventListener("resize", function () {
+  function fit() {
     Object.keys(charts).forEach(function (kind) {
-      charts[kind].chart.setSize({ width: charts[kind].box.clientWidth, height: HEIGHT });
+      var width = charts[kind].box.clientWidth;
+      if (width > 0 && width !== charts[kind].chart.width) charts[kind].chart.setSize({ width: width, height: HEIGHT });
     });
-  });
+  }
+
+  window.addEventListener("resize", fit);
+  if (typeof ResizeObserver === "function") {
+    new ResizeObserver(fit).observe(document.querySelector("main"));
+  }
 })();

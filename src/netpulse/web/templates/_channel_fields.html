@@ -1,0 +1,61 @@
+{# The fields of one kind of notification channel (plan section 41). `kind` is
+   webhook, discord or email; `channel` is the stored channel when editing, and
+   `typed` what was typed when a form was refused. A secret is never sent back
+   to the page: the box is empty, and leaving it empty keeps what is stored. #}
+{%- set stored = channel.config if channel else {} %}
+{%- set v = typed if typed else {} %}
+<label>Name
+  <input name="name" value="{{ v.get('name', channel.name if channel else '') }}" required maxlength="64" autocomplete="off"
+         placeholder="{{ {'webhook': 'Home Assistant', 'discord': 'Discord #network', 'email': 'My inbox'}[kind] }}">
+</label>
+{%- if kind in ("webhook", "discord") %}
+<label>{{ "Discord webhook address" if kind == "discord" else "Address to POST to" }}
+  <input name="url" type="url" maxlength="500" autocomplete="off" spellcheck="false"{% if not channel %} required{% endif %}
+         placeholder="{{ 'https://discord.com/api/webhooks/…' if kind == 'discord' else 'https://example.lan/hooks/netpulse' }}">
+  <span class="hint">
+    {%- if channel %}Stored: <code>{{ channel.destination }}</code>. Leave empty to keep it. {% endif -%}
+    {%- if kind == "discord" %}From the channel's settings in Discord: Integrations, Webhooks.
+    {%- else %}NetPulse sends JSON with <code>event</code>, <code>severity</code>, <code>title</code>, <code>lines</code> and <code>text</code>.{% endif %}
+    The address works like a password, so NetPulse never shows it again.</span>
+</label>
+{%- else %}
+<label>Mail server
+  <input name="host" value="{{ v.get('host', stored.get('host', '')) }}" required maxlength="253" autocomplete="off" spellcheck="false" placeholder="smtp.example.com">
+</label>
+<label>Port
+  <input name="port" value="{{ v.get('port', stored.get('port', 587)) }}" type="number" min="1" max="65535" required>
+</label>
+<label>Security
+  <select name="security">
+    {%- for value in security %}
+    <option value="{{ value }}"{% if v.get('security', stored.get('security', 'starttls')) == value %} selected{% endif %}>{{ {"starttls": "STARTTLS (usual on 587)", "tls": "TLS from the start (usual on 465)", "none": "None: no password can be used"}[value] }}</option>
+    {%- endfor %}
+  </select>
+</label>
+<label>Username
+  <input name="username" value="{{ v.get('username', stored.get('username', '')) }}" maxlength="200" autocomplete="off" spellcheck="false">
+</label>
+<label>Password
+  <input name="password" type="password" maxlength="500" autocomplete="new-password">
+  <span class="hint">{% if stored.get('password') %}One is stored. Leave empty to keep it. {% endif %}Kept in NetPulse's database so it can be used; an app password is better than your own.</span>
+</label>
+<label>From
+  <input name="sender" value="{{ v.get('sender', stored.get('sender', '')) }}" type="email" required maxlength="200" placeholder="netpulse@example.com">
+</label>
+<label>To
+  <input name="to" value="{{ v.get('to', stored.get('to', [])|join(', ')) }}" required maxlength="500" placeholder="you@example.com">
+  <span class="hint">Up to ten addresses, separated by commas.</span>
+</label>
+{%- endif %}
+<label>Send from
+  <select name="min_severity">
+    {%- for value, label in severities.items() %}
+    <option value="{{ value }}"{% if v.get('min_severity', channel.min_severity if channel else 'warning') == value %} selected{% endif %}>{{ label }} and worse</option>
+    {%- endfor %}
+  </select>
+  <span class="hint">Info adds newly found devices. Warning adds degraded devices. Critical is devices down and monitoring failing.</span>
+</label>
+<label class="check"><input type="checkbox" name="include_addresses" value="yes"
+  {%- if (v.get('include_addresses') == 'yes') or (not typed and stored.get('include_addresses')) %} checked{% endif %}>
+  Include addresses in messages</label>
+<p class="hint">Off, a message names a device and nothing else. On, it adds the device's address, which then leaves your network with the message.</p>

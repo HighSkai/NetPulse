@@ -17,13 +17,9 @@
 <div class="page-head">
   <div>
     {{ prompt("Traffic", "traffic") }}
-    <p class="dim">See this PC's packets as they pass: who it talks to, over what, and how much.</p>
+    <p class="dim">See the packets of the PC NetPulse runs on as they pass: who it talks to, over what, and how much.</p>
   </div>
 </div>
-
-{% for message in get_flashed_messages() %}
-  <p class="saved" role="status">{{ message }}</p>
-{% endfor %}
 
 {% include "_traffic_view.html" %}
 

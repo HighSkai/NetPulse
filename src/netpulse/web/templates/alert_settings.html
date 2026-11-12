@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf, prompt, settings_tabs %}
+{% set active_tab = "settings" %}
+
+{% block title %}Alert settings · NetPulse{% endblock %}
+
+{# Plan section 41: what alerts, when a message goes out, and where to. #}
+{% block content %}
+{{ prompt("Alert settings", "settings", flags="--alerts") }}
+{{ settings_tabs("alerts") }}
+
+<section aria-labelledby="rules-heading">
+  <h2 id="rules-heading">What alerts</h2>
+  <form class="device-form" method="post" action="{{ url_for('netpulse.save_alert_rules') }}">
+    {{ csrf() }}
+    <fieldset class="checks">
+      <legend>Open an alert when</legend>
+      <label class="check"><input type="checkbox" name="down" value="yes"{% if rules.down %} checked{% endif %}> a device is down: two failed checks in a row <span class="tag tag-down">critical</span></label>
+      <label class="check"><input type="checkbox" name="degraded" value="yes"{% if rules.degraded %} checked{% endif %}> a device is degraded: slow, or failing some checks <span class="tag tag-warn">warning</span></label>
+      <label class="check"><input type="checkbox" name="new_host" value="yes"{% if rules.new_host %} checked{% endif %}> a scheduled sweep finds a device it has never seen <span class="tag">info</span></label>
+      <label class="check"><input type="checkbox" name="monitoring" value="yes"{% if rules.monitoring %} checked{% endif %}> NetPulse itself cannot run its checks <span class="tag tag-down">critical</span></label>
+    </fieldset>
+    <fieldset class="checks">
+      <legend>Keeping it quiet</legend>
+      <label class="check"><input type="checkbox" name="recovery" value="yes"{% if rules.recovery %} checked{% endif %}> Also say when it is over</label>
+      <label>Wait before telling anyone
+        <select name="delay_min">
+          {%- for minutes in delays %}
+          <option value="{{ minutes }}"{% if minutes == rules.delay_min %} selected{% endif %}>{{ "do not wait" if minutes == 0 else minutes ~ " minutes" }}</option>
+          {%- endfor %}
+        </select>
+        <span class="hint">An alert that ends within this time is never mentioned at all.</span>
+      </label>
+      <label>Send one message for
+        <select name="group_at">
+          {%- for count in (2, 3, 5, 10) %}
+          <option value="{{ count }}"{% if count == rules.group_at %} selected{% endif %}>{{ count }} or more alerts at once</option>
+          {%- endfor %}
+        </select>
+        <span class="hint">When a switch or the internet goes, you get one message with the likely cause, not one for each device.</span>
+      </label>
+    </fieldset>
+    <div class="form-actions"><button type="submit" class="primary">Save</button></div>
+    <p class="hint">A paused device, or one with alerts muted on its edit page, never alerts.</p>
+  </form>
+</section>
+
+<section aria-labelledby="channels-heading">
+  <h2 id="channels-heading">Where messages go ({{ channels|length }})</h2>
+  {%- if channels %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th scope="col">Name</th><th scope="col">Kind</th><th scope="col" class="col-optional">To</th><th scope="col">Sends</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+      <tbody>
+        {%- for channel in channels %}
+        <tr>
+          <td><a href="{{ url_for('netpulse.channel_page', channel_id=channel.id) }}">{{ channel.name }}</a>{% if not channel.enabled %} <span class="tag tag-warn">off</span>{% endif %}</td>
+          <td>{{ kinds[channel.kind] }}</td>
+          <td class="col-optional cut" title="{{ channel.destination }}">{{ channel.destination }}</td>
+          <td>{{ severities[channel.min_severity] }} and worse</td>
+          <td class="actions">
+            <form method="post" action="{{ url_for('netpulse.test_channel', channel_id=channel.id) }}">
+              {{ csrf() }}
+              <button type="submit">Send a test</button>
+            </form>
+            <a class="button" href="{{ url_for('netpulse.channel_page', channel_id=channel.id) }}">Edit</a>
+          </td>
+        </tr>
+        {%- endfor %}
+      </tbody>
+    </table>
+  </div>
+  {%- else %}
+  <p class="dim">Nowhere yet. Alerts still show on the alerts page; add a channel to be told when you are not looking.</p>
+  {%- endif %}
+
+  {%- for kind, label in kinds.items() %}
+  <details class="add-channel"{% if error_kind == kind %} open{% endif %}>
+    <summary>Add {{ {"webhook": "a webhook", "discord": "a Discord webhook", "email": "an email channel"}[kind] }}</summary>
+    <form class="device-form" method="post" action="{{ url_for('netpulse.add_channel') }}">
+      {{ csrf() }}
+      <input type="hidden" name="kind" value="{{ kind }}">
+      {%- if error and error_kind == kind %}
+      <div class="error-summary" role="alert"><strong>There is a problem.</strong> {{ error }}</div>
+      {%- endif %}
+      {%- with channel = none, typed = (typed if error_kind == kind else {}) %}
+      {% include "_channel_fields.html" %}
+      {%- endwith %}
+      <div class="form-actions"><button type="submit" class="primary">Add</button></div>
+    </form>
+  </details>
+  {%- endfor %}
+</section>
+
+{%- if notifications %}
+<section aria-labelledby="sent-heading">
+  <h2 id="sent-heading">Messages sent</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th scope="col">When</th><th scope="col">Channel</th><th scope="col">Message</th><th scope="col">Delivered</th></tr></thead>
+      <tbody>
+        {%- for sent in notifications %}
+        <tr>
+          <td>{{ sent.at|localtime }}</td>
+          <td>{{ sent.channel_name }}</td>
+          <td>{{ sent.summary }}</td>
+          <td>{% if sent.ok %}<span class="state state-up"><span class="glyph" aria-hidden="true">●</span> Yes</span>{% else %}<span class="state state-down"><span class="glyph" aria-hidden="true">✕</span> No</span> <span class="detail">{{ sent.error }}</span>{% endif %}</td>
+        </tr>
+        {%- endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{%- endif %}
+{% endblock %}

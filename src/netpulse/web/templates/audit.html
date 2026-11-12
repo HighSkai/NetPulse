@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% from "_macros.html" import prompt, settings_tabs %}
+{% set active_tab = "settings" %}
+
+{% block title %}Audit · NetPulse{% endblock %}
+
+{# Plan section 44: who did what. Kept for a year. #}
+{% block content %}
+{{ prompt("Audit log", "settings", flags="--audit") }}
+{{ settings_tabs("audit") }}
+<p class="hint">Sign-ins, failed sign-ins, and every change to devices, settings, accounts, captures and alerts. Kept for a year, newest first.</p>
+<div class="table-wrap">
+  <table class="audit">
+    <thead>
+      <tr><th scope="col">When</th><th scope="col">Who</th><th scope="col">What</th><th scope="col">On</th><th scope="col" class="col-optional">Detail</th><th scope="col" class="col-optional">From</th></tr>
+    </thead>
+    <tbody>
+      {%- for entry in entries %}
+      <tr>
+        <td><time datetime="{{ entry.at }}">{{ entry.at|localtime }}</time></td>
+        <td>{{ entry.actor }}</td>
+        <td>{{ entry.action }}</td>
+        <td class="cut" title="{{ entry.target }}">{{ entry.target or "—" }}</td>
+        <td class="col-optional">{{ entry.detail or "—" }}</td>
+        <td class="col-optional">{{ entry.ip or "—" }}</td>
+      </tr>
+      {%- else %}
+      <tr class="empty"><td colspan="6">Nothing recorded yet.</td></tr>
+      {%- endfor %}
+    </tbody>
+  </table>
+</div>
+{%- if older %}
+<nav class="pager" aria-label="Pages of the audit log">
+  <a href="{{ url_for('netpulse.audit_page', before=older) }}">Older →</a>
+</nav>
+{%- endif %}
+{% endblock %}

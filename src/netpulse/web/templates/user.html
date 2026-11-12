@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf, error_summary, field_error, invalid, prompt, settings_tabs %}
+{% set active_tab = "settings" %}
+
+{% block title %}{{ user.username }} · Users · NetPulse{% endblock %}
+
+{% block content %}
+<p><a href="{{ url_for('netpulse.users_page') }}">&larr; All users</a></p>
+{{ prompt("Account " ~ user.username, "user", target=user.username) }}
+{%- set own = user.id == me.id %}
+
+{% if handed %}
+<div class="notice handed" role="alert">
+  <p><strong>{{ user.username }} has a new temporary password,</strong> shown once, here:</p>
+  <p><code class="secret">{{ handed }}</code></p>
+  <p>Every browser the account was signed in on has been signed out. NetPulse asks for a new password at the next sign-in.</p>
+</div>
+{% endif %}
+
+<section class="summary facts" aria-label="Account">
+  <div class="stat"><span class="stat-value stat-small">{{ user.role_label }}{% if not user.active %} · disabled{% endif %}</span><span class="stat-label">role</span></div>
+  <div class="stat"><span class="stat-value stat-small">{{ user.created_at|localtime }}</span><span class="stat-label">created</span></div>
+  <div class="stat"><span class="stat-value stat-small">{{ user.last_login_at|localtime if user.last_login_at else "never" }}</span><span class="stat-label">last signed in</span></div>
+  <div class="stat"><span class="stat-value stat-small">{{ user.password_changed_at|localtime }}</span><span class="stat-label">password changed</span></div>
+</section>
+
+<section aria-labelledby="rights-heading">
+  <h2 id="rights-heading">Role and permissions</h2>
+  <form class="device-form" method="post" action="{{ url_for('netpulse.update_user', user_id=user.id) }}">
+    {{ csrf() }}
+    {{ error_summary(form) }}
+    <label>Role
+      <select name="role" id="field-role"{{ invalid(form, "role") }}{% if own %} disabled{% endif %}>
+        {%- for value, label in roles.items() %}
+        <option value="{{ value }}"{% if value == form.role %} selected{% endif %}>{{ label }}</option>
+        {%- endfor %}
+      </select>
+      {%- if own %}<input type="hidden" name="role" value="{{ form.role }}">{% endif %}
+      {{ field_error(form, "role") }}
+    </label>
+    <fieldset class="checks" id="field-permissions">
+      <legend>A viewer may also</legend>
+      {%- for key, label in grantable.items() %}
+      <label class="check"><input type="checkbox" name="permissions" value="{{ key }}"{% if key in form.permissions %} checked{% endif %}> {{ label }}</label>
+      {%- endfor %}
+      <p class="hint">An administrator may do everything, so these only apply to a viewer.</p>
+    </fieldset>
+    {%- if not own %}
+    <label class="check"><input type="checkbox" name="disabled" value="yes"{% if form.disabled %} checked{% endif %}> Disabled: cannot sign in, and is signed out everywhere now</label>
+    {%- endif %}
+    <div class="form-actions"><button type="submit" class="primary">Save</button></div>
+    <p class="hint">Taking rights away signs the account out, so the change holds from this moment.
+      {%- if own %} You cannot disable or demote the account you are signed in with.{% endif %}</p>
+  </form>
+</section>
+
+<section aria-labelledby="sessions-heading">
+  <h2 id="sessions-heading">Signed-in browsers ({{ sessions|length }})</h2>
+  {%- if sessions %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th scope="col">Signed in</th><th scope="col">Last used</th><th scope="col">From</th><th scope="col" class="col-optional">Browser</th></tr></thead>
+      <tbody>
+        {%- for s in sessions %}
+        <tr><td>{{ s.created_at|localtime }}</td><td>{{ s.last_seen_at|localtime }}</td><td>{{ s.ip or "—" }}</td><td class="col-optional cut" title="{{ s.user_agent }}">{{ s.user_agent or "—" }}</td></tr>
+        {%- endfor %}
+      </tbody>
+    </table>
+  </div>
+  <form class="below" method="post" action="{{ url_for('netpulse.revoke_user_sessions', user_id=user.id) }}"
+        data-confirm="Sign {{ user.username }} out of every browser?">
+    {{ csrf() }}
+    <button type="submit">Sign out everywhere</button>
+  </form>
+  {%- else %}
+  <p class="dim">Not signed in anywhere.</p>
+  {%- endif %}
+</section>
+
+{% if not own %}
+<section aria-labelledby="reset-heading">
+  <h2 id="reset-heading">Reset password</h2>
+  <p class="hint">For someone who has lost theirs. NetPulse makes a temporary password, shows it to you once, and signs the account out everywhere.</p>
+  <form method="post" action="{{ url_for('netpulse.reset_user_password', user_id=user.id) }}"
+        data-confirm="Give {{ user.username }} a temporary password? Their current one stops working.">
+    {{ csrf() }}
+    <button type="submit">Make a temporary password</button>
+  </form>
+</section>
+
+<section aria-labelledby="delete-heading">
+  <h2 id="delete-heading">Delete</h2>
+  <form class="device-form" method="post" action="{{ url_for('netpulse.delete_user', user_id=user.id) }}">
+    {{ csrf() }}
+    <label class="check"><input type="checkbox" name="confirm" value="yes" required> Delete the account {{ user.username }} for good</label>
+    <div class="form-actions"><button type="submit" class="danger">Delete account</button></div>
+    <p class="hint">The audit log keeps what the account did. To take access away for a while, disable it instead.</p>
+  </form>
+</section>
+{% endif %}
+{% endblock %}

@@ -23,6 +23,6 @@
   {%- endif %}
   {%- set capturing = capture_status() %}
   {%- if capturing.running %}
-  <span class="capture-state"> · <span class="glyph" aria-hidden="true">◉</span> <a href="{{ url_for('netpulse.traffic') }}">capturing</a> · {{ "{:,}".format(capturing.packets) }} {{ "packet" if capturing.packets == 1 else "packets" }}</span>
+  <span class="capture-state"> · <span class="glyph" aria-hidden="true">◉</span> {% if can(Permission.CAPTURE_VIEW) %}<a href="{{ url_for('netpulse.traffic') }}">capturing</a>{% else %}capturing{% endif %} · {{ "{:,}".format(capturing.packets) }} {{ "packet" if capturing.packets == 1 else "packets" }}</span>
   {%- endif %}
 </div>

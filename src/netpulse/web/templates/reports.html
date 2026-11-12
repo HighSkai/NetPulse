@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% from "_macros.html" import prompt, row_status %}
+{% set active_tab = "reports" %}
+
+{% block title %}Reports · NetPulse{% endblock %}
+
+{# Plan section 42: availability and outages for every device, from the hourly
+   totals and the outage events, which are kept for good. #}
+{% block content %}
+<div class="page-head">
+  <div>
+    {{ prompt("Availability report", "reports", flags="--days=" ~ days) }}
+    <p class="dim">How often each device answered over the last {{ days }} days, and how its outages went. The least available first.</p>
+  </div>
+  <div class="form-actions">
+    <a class="button" href="{{ url_for('netpulse.reports_csv', days=days) }}">Download CSV</a>
+  </div>
+</div>
+
+<nav class="ranges" aria-label="Period">
+  {%- for choice in choices %}
+  <a href="{{ url_for('netpulse.reports', days=choice) }}"{% if choice == days %} aria-current="page"{% endif %}>{{ choice }} d</a>
+  {%- endfor %}
+</nav>
+
+<div class="table-wrap">
+  <table class="report">
+    <thead>
+      <tr>
+        <th scope="col">Device</th>
+        <th scope="col" class="col-optional">Group</th>
+        <th scope="col">Now</th>
+        <th scope="col" class="num">Checks up</th>
+        <th scope="col" class="num col-optional">Checks</th>
+        <th scope="col" class="num">Outages</th>
+        <th scope="col" class="num">Down for</th>
+        <th scope="col" class="num col-optional">Longest</th>
+        <th scope="col" class="num col-optional">Average</th>
+      </tr>
+    </thead>
+    <tbody>
+      {%- for entry in rows %}
+      {%- set device = entry.row.status.device %}
+      <tr>
+        <td><a class="name-cut" href="{{ url_for('netpulse.device_detail', device_id=device.id, range='30d') }}" title="{{ device.name }}">{{ device.name }}</a></td>
+        <td class="col-optional">{{ entry.row.group or "—" }}</td>
+        <td>{{ row_status(entry.row) }}</td>
+        <td class="num">{{ entry.availability|percent }}</td>
+        <td class="num col-optional">{{ "{:,}".format(entry.availability.checks) }}</td>
+        <td class="num">{{ entry.outages }}</td>
+        <td class="num">{{ entry.downtime_s|duration if entry.outages else "—" }}</td>
+        <td class="num col-optional">{{ entry.longest_s|duration if entry.outages else "—" }}</td>
+        <td class="num col-optional">{{ entry.mean_outage_s|duration if entry.outages else "—" }}</td>
+      </tr>
+      {%- else %}
+      <tr class="empty"><td colspan="9">No devices to report on.</td></tr>
+      {%- endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="hint">
+  Checks up is the share of checks that got an answer, counted in whole hours. An outage starts after two failed checks in a row;
+  one that began before the period, or is still going on, counts for the part inside it. Paused devices are left out.
+  Hours when NetPulse was not running have no checks and count as neither up nor down in Checks up. An outage that was
+  open when NetPulse stopped only ends at the first answer after it starts again, so Down for can include time nothing was measured.
+</p>
+{% endblock %}

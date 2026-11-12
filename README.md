@@ -2,296 +2,303 @@
 
 <img src="src/netpulse/web/static/wordmark.svg" alt="NetPulse" width="300">
 
-**A self-hosted network monitor for a single Windows PC.**
-
-NetPulse pings your devices on a schedule, keeps every result in SQLite, and shows status, history and outages in a browser dashboard built like a network operations screen.
+**A self-hosted network monitor for your home or lab network.**
 
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/HighSkai/NetPulse)](https://github.com/HighSkai/NetPulse/releases)
-[![CI](https://github.com/HighSkai/NetPulse/actions/workflows/ci.yml/badge.svg)](https://github.com/HighSkai/NetPulse/actions/workflows/ci.yml)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)
-![Flask](https://img.shields.io/badge/Flask-3.1%2B-000000?logo=flask&logoColor=white)
 ![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D6?logo=windows&logoColor=white)
 
 </div>
 
-![NetPulse overview page](docs/assets/overview.png)
+NetPulse runs on one Windows PC and checks the devices on your network every 30 seconds: routers, access points, cameras, a NAS, printers, smart-home gear and the public services you rely on. It keeps the history in SQLite, alerts you when something goes down, and serves a dashboard to every phone, tablet and laptop you sign in from.
 
-## Overview
-
-NetPulse is a small Python web application that runs on your own Windows PC and watches the devices you care about: your router, a NAS, a printer, a public DNS server. Every 30 seconds it checks each device with Windows' own `ping.exe`, records the result, and turns that history into availability figures, latency charts and an outage log.
-
-Beyond monitoring, it can show this PC's network settings, draw a map of how your devices are reached, sweep a local subnet for devices, trace the path to a host hop by hop, capture packets through Npcap, and ask probes around the world whether a server is reachable from outside your network.
-
-It is designed for one machine. NetPulse listens on `127.0.0.1` only, needs no Administrator rights, and loads nothing from the internet: all scripts, styles and fonts ship inside the package.
+It needs no cloud account and sends no telemetry. Every script, style and font ships with it.
 
 ## Features
 
-- **Scheduled ICMP monitoring.** Every live device is checked once every 30 seconds. **Check now** runs one extra check on demand.
-- **Clear device states.** Up, degraded, down or not checked. *Degraded* means the device answers but its last 10 checks were slow (average over 150 ms by default) or 2 or more failed. Both thresholds can be changed on the settings page.
-- **Overview dashboard.** Summary cards, a problems list (longest outage first), donut charts by state, availability and latency, the slowest devices, recent outage events, and a 24-hour status grid.
-- **Device history.** Per-device latency charts and availability bars over 1 hour, 6 hours, 24 hours, 7 days or 30 days, availability percentages, an outage log, and the latest checks.
-- **Searchable device table.** Filter by status, search by name or host, and sort by any column.
-- **Network page.** This PC's computer name, adapters, IPv4 addresses, gateways, DNS servers, DHCP lease and network category, read through Windows PowerShell, plus a router summary built from what Windows already reports.
-- **Network map.** This PC, its subnets, gateways and every device, drawn with Cytoscape.js. Each line says whether Windows reported it, NetPulse inferred it, or you declared it.
-- **Discovery sweeps.** Sweep one of this PC's private subnets (up to 256 addresses) with `IcmpSendEcho`. Results also include devices Windows found through ARP. Nothing is monitored until you accept it.
-- **Path tracing.** Hop-by-hop traces with loss and best, average and worst times per hop, notes about rate-limited hops, and the likely slow link marked.
-- **Packet capture (optional).** Live capture through Npcap with presets and filters, rates by direction and protocol, top talkers, and a PCAP file for every capture that opens in Wireshark.
-- **Checks from outside (optional, opt-in).** Ping, TCP, traceroute or HTTP checks of a public host from Globalping's worldwide probes, only after you agree on the Outside tab.
-- **Works without JavaScript.** Every action is a normal form post. With JavaScript, HTMX updates the page in place.
-- **Light and dark themes.** Pages follow Windows' colour mode and respect its reduce-motion setting.
+**Monitoring**
+- Checks by ping or by TCP port, 32 devices at a time, every 30 s, 1, 5 or 15 minutes per device. Pause a device without losing it.
+- Up, degraded, down and paused states. *Degraded* means the last 10 checks averaged over 150 ms or 2 of them failed. An outage starts after 2 failures in a row.
+- Uses Windows' `IcmpSendEcho` directly, so it works in any display language.
 
-## Screenshots
+**Dashboard**
+- An overview that puts problems first, with a 24-hour status grid and a likely cause when several devices fail together.
+- Device pages with latency and availability from 1 hour to 1 year, plus the outage log.
+- A network map of this PC, its subnets, the gateway and every device.
+- Availability reports for 7, 30 or 90 days, on screen or as CSV.
 
-The screenshots below are from a demo run with public test targets and NetPulse's built-in example network settings, not a real home network.
+**Inventory**
+- Type, group, vendor, model, location, MAC address, tags and notes, all searchable and filterable.
+- CSV import and export.
+- Discovery sweeps of your subnets, on demand or on a schedule. Nothing is monitored until you accept it.
+- Deleted devices keep their history and can be restored.
 
-| Device page | Network map |
-| --- | --- |
-| ![Device page with latency chart and availability bars](docs/assets/device.png) | ![Network map with subnets, gateway and devices](docs/assets/map.png) |
+**Alerts**
+- Opens when a device goes down, stays degraded, appears for the first time, or when monitoring itself stops. Closes when the cause ends.
+- Sends to a webhook, Discord or email, by severity, with a delay and grouping to keep it quiet.
 
-![Device table with search, filter and sort](docs/assets/devices.png)
+**Diagnostics**
+- Path traces with loss and times per hop.
+- Packet capture through Npcap (optional), saved as PCAP files that open in Wireshark.
+- Checks from outside through Globalping (off until an administrator agrees).
+- This PC's adapters, gateways, DNS servers and DHCP lease.
 
-## Technology stack
-
-| Layer | Technology |
-| --- | --- |
-| Language | Python 3.11+ |
-| Web framework | [Flask](https://flask.palletsprojects.com/) 3.1+, Jinja templates |
-| Storage | SQLite (Python standard library), write-ahead logging |
-| Front end | [HTMX](https://htmx.org/) 2.0.4, [uPlot](https://github.com/leeoniya/uPlot) 1.6.32, [Cytoscape.js](https://js.cytoscape.org/) 3.34.3, all bundled |
-| Windows integration | `ping.exe`, `IcmpSendEcho` via `ctypes`, Windows PowerShell (read-only), [Npcap](https://npcap.com/) `wpcap.dll` via `ctypes` |
-| External service | [Globalping](https://globalping.io/) API, only after you agree |
-
-Flask is the only third-party Python dependency.
-
-## Architecture
-
-```mermaid
-flowchart LR
-    Browser["Browser<br/>(HTMX)"] --> Flask["Flask web app"]
-    Scheduler["Scheduler<br/>(every 30 s)"] --> Checks["run_round / run_check"]
-    Flask --> Checks
-    Checks --> Pinger["OsPinger"] --> Ping["ping.exe"]
-    Checks --> Store[("SQLite")]
-    Flask --> Store
-    Flask --> Reader["NetworkReader"] --> PS["powershell.exe<br/>(read-only)"]
-    Flask --> SweepTrace["Sweeper / Tracer"] --> Icmp["IcmpSendEcho"]
-    Flask --> Traffic["TrafficService"] --> Npcap["Npcap wpcap.dll"]
-    Flask --> Outside["OutsideChecker"] --> GP["api.globalping.io"]
-```
-
-The web UI is a client of a separate monitoring core. Operating-system access sits behind small interfaces (`Pinger`, `NetworkReader`, `PacketSource`), and `src/netpulse/__main__.py` is the one place that builds the real implementations and wires them together. Only `store.py` talks to SQLite, and only three modules touch the network: `netinfo/names.py` (reverse name lookups), `ping/icmp.py` (echoes) and `probes/globalping.py` (the only HTTP client).
+**Multi-user**
+- Administrator and viewer accounts, with permissions you can grant, a list of active sessions and an audit log.
+- Access from any device on your network over HTTPS.
+- Works on phones and without JavaScript. Light and dark themes, and reduced motion is respected.
 
 ## Requirements
 
-- **Windows 10 or 11 with English as the display language.** Monitoring reads the output of `ping.exe` and understands English output only. On other display languages every check is recorded as `unreadable_output` rather than misread. Discovery sweeps and traces call Windows directly and work in any language.
-- **Python 3.11 or newer.**
-- **No Administrator rights.** NetPulse runs `ping.exe`, `IcmpSendEcho` and PowerShell as a normal user and does not use raw sockets.
-- **Windows PowerShell** (included with Windows) for the network page and the map. Monitoring works without it.
-- **Npcap (optional)** for packet capture. Everything else works without it.
+- Windows 10 or 11
+- [Python](https://www.python.org/downloads/) 3.11 or newer
+- [Npcap](https://npcap.com), only for packet capture
 
-On any other operating system NetPulse exits at startup with a one-line message.
+No Administrator rights are needed, except once to open the firewall for other devices.
 
-## Installation
+## Quick start
 
-```powershell
-git clone https://github.com/HighSkai/NetPulse.git
-cd NetPulse
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-pip install .
-```
+1. Install Python and tick **Add python.exe to PATH** in the installer.
+2. Download NetPulse (**Code, Download ZIP**, or `git clone`) into a folder of its own, such as `C:\NetPulse`.
+3. Double-click **`NetPulse.bat`**.
 
-This installs NetPulse and Flask into the virtual environment and adds a `netpulse` command. For development, `pip install -e ".[dev]"` installs an editable copy plus ruff, pytest and coverage.
+The first run sets NetPulse up in a `.venv` folder, which takes about a minute and needs the internet. After that it starts NetPulse and opens it in your browser. Keep the window open while you use it; close it to stop.
 
-### Optional: set up Npcap for packet capture
+On the first visit, create the administrator account. There is no default account or password. Then add devices one at a time, import a CSV, or sweep your network from the **discover** page.
 
-1. Download the installer from <https://npcap.com> and run it. This is the only step that needs an Administrator.
-2. In the installer, leave **Restrict Npcap driver's access to Administrators only** unticked, so a normal user can capture.
-3. Keep **Support loopback traffic** ticked if you want to capture traffic within this PC.
-4. Start NetPulse. Its log says whether it found Npcap, and the traffic page explains why not if it did not.
+To make a desktop shortcut, right-click `NetPulse.bat` and choose **Send to, Desktop (create shortcut)**. Keep the file itself in the NetPulse folder.
 
-NetPulse never installs Npcap itself, and loads `wpcap.dll` from `System32\Npcap` by its full path.
+**Updating:** replace the files (or `git pull`), keeping `netpulse.db` and the `netpulse-tls` folder. The next start installs the new version and upgrades the database, backing it up first. A 1.x database keeps all its history; you are asked to create the administrator once.
 
-## Configuration
+## Opening NetPulse from other devices
 
-NetPulse has no configuration file and no environment variables. It is configured with command-line options and the settings page.
+NetPulse answers only on its own PC until you turn on network access.
 
-| Option | Default | Description |
+1. In **settings, Access**, tick *Let other devices on my network open NetPulse* and save. It applies immediately.
+2. Open the port once, in PowerShell run as Administrator (the access page shows this with your port):
+
+   ```powershell
+   New-NetFirewallRule -DisplayName "NetPulse" -Direction Inbound -Protocol TCP -LocalPort 5000 -Action Allow -Profile Private
+   ```
+
+   The rule applies only on networks Windows marks as Private. If your home network is marked Public, the access page tells you how to change it.
+3. On another device, open the address the access page shows, such as `https://192.168.1.20:5000`, and sign in.
+
+**HTTPS.** NetPulse creates its own certificate authority to encrypt these connections. Browsers warn about it until you install that authority on the device: download it from the access page, which explains how for Windows, macOS, iOS and Android, then restart the browser. The authority can only sign for private addresses and local names, so it can't be used to impersonate a public website. You can use your own certificate instead, or turn HTTPS off.
+
+**Names.** To use a name such as *netpulse.lan*, point it at this PC in your router or Pi-hole, then add it on the access page. NetPulse refuses any name it doesn't know, which blocks DNS-rebinding attacks.
+
+**Not for the internet.** To reach NetPulse from outside, use a VPN to your home network instead of forwarding the port.
+
+**Locked out?** Start it with `NetPulse.bat --local-only` (or `netpulse --local-only`). It ignores the network settings and serves this PC only, so you can fix them.
+
+## Accounts and permissions
+
+Add accounts under **settings, Users**. Each new account gets a temporary password and chooses its own at the first sign-in.
+
+| | Administrator | Viewer |
 | --- | --- | --- |
-| `--db PATH` | `netpulse.db` in the current folder | SQLite file to use, created if missing. Start NetPulse from the same folder each time, or pass a full path. The full path is logged at startup. |
-| `--port N` | `5000` | Port to listen on (always on `127.0.0.1`). |
-| `--debug` | off | Flask debug mode: reloads on code changes and shows tracebacks. For development only. |
+| Overview, devices, map, network, discover, probe, alerts, reports | yes | yes, to look |
+| Add, edit, pause and delete devices and groups | yes | if granted |
+| Check now, traces, sweeps, acknowledge alerts | yes | if granted |
+| Alert rules and channels | yes | if granted |
+| Packet captures | yes | if granted |
+| Checks from outside | yes | if granted |
+| Change settings, network access and accounts; the audit log | yes | never |
 
-The **settings** page changes the two thresholds for *degraded* (average latency in ms, and failures out of the last 10 checks). Changes apply at once; stored history never changes with them. The page also shows how much space the database and captures take, and ends with a short manual.
+- Permissions are checked on the server for every request.
+- Disabling an account, removing a permission or resetting a password signs that account out everywhere.
+- The last administrator can't be disabled, demoted or deleted.
+- Sessions end after 7 days unused, or 30 days after signing in. After 10 failed sign-ins from one address, or 20 for one username, sign-in pauses for 15 minutes.
 
-### Where data is stored
-
-- **Database:** one SQLite file (`netpulse.db` unless you pass `--db`). History is never pruned. At one check every 30 seconds it grows by about 317 KiB per device per day.
-- **Packet captures:** PCAP files in a folder beside the database, named after it (`netpulse-captures` next to `netpulse.db`). NetPulse keeps the last 50 captures or every capture from the last 30 days, whichever keeps more.
-- **Upgrades:** when a newer NetPulse opens an older database, it first copies it to a backup such as `netpulse.v1-backup-<timestamp>.db` next to the original, then upgrades it in place.
-
-## Running NetPulse
-
-```powershell
-netpulse
-```
-
-or, equivalently:
+**Forgot the administrator password?** Run this in the NetPulse folder:
 
 ```powershell
-python -m netpulse --db C:\path\to\netpulse.db --port 5000
+.venv\Scripts\netpulse.exe --db netpulse.db reset-password NAME
 ```
 
-Then open <http://127.0.0.1:5000>. Checks start the moment NetPulse launches and run only while it is running. There is no Windows service, so stopping NetPulse leaves a gap in the history, which the charts show as *no data*. Press `Ctrl+C` to stop.
+It prints a temporary password. `users` instead of `reset-password NAME` lists the accounts.
 
-## Usage
+## Alerts and notifications
 
-1. **Add a device.** On the **devices** tab, enter a name and a host: a hostname such as `printer.lan` or a dotted IPv4 address such as `192.168.1.1`. Its first check runs within 30 seconds.
-2. **Watch the overview.** The home page lists problems first, then breakdowns, then history, and refreshes itself every 30 seconds. The status bar at the bottom says whether monitoring itself is running, late or failing, so "monitoring stopped" never looks like "devices are down".
-3. **Find devices.** On **discover**, pick one of this PC's private subnets and press **Sweep**. Review the results, then **Accept** the ones to monitor or **Ignore** the rest. Only sweep networks you own or manage.
-4. **Trace a path.** On **probe**, enter a host and press **Trace**, or use **Trace** on a device's page.
-5. **Capture traffic.** With Npcap installed, choose an interface and a preset or filter on **traffic**, then press **Start**. Download the PCAP from the capture's page to open it in Wireshark.
-6. **Check from outside.** On the **Outside** tab of the probe page, read what is sent, agree, then check a public host from a continent, a country or the whole world.
+Open alerts are on the **alerts** tab. Under **settings, Alerts**, choose what raises an alert and where messages go:
 
-Keyboard shortcuts: **Alt+0** to **Alt+7** open the overview, devices, map, traffic, probe, discover, network and settings tabs.
+- **Webhook:** a JSON `POST` for Home Assistant, ntfy, Gotify, n8n and similar tools.
+- **Discord:** a channel webhook address.
+- **Email:** any SMTP server, over STARTTLS or TLS.
 
-## Privacy and security
+Each channel takes alerts from a chosen severity up: *info* (new devices), *warning* (degraded) or *critical* (down, monitoring stopped). Use **Send a test** to check a channel. Webhook addresses are stored as secrets and never shown again.
 
-- **Local only.** NetPulse binds to `127.0.0.1` and has no login. It is not meant to be exposed to a network. Requests whose `Host` header is not `127.0.0.1` or `localhost` are refused, which blocks DNS-rebinding attacks, and every `POST` needs a CSRF token.
-- **What leaves this PC:** ICMP echoes to targets you chose (your devices every 30 seconds, a sweep when you press **Sweep**, a trace when you press **Trace**), the name lookups Windows makes for them, and calls to Globalping's API, only after you agree on the Outside tab. Nothing else is fetched.
-- **Globalping results are public.** Anyone with a check's id can see it. Addresses and names on your own network are refused before anything is sent.
-- **Packet captures can hold sensitive data**, including other people's traffic and anything sent without encryption. Nothing is captured until you press **Start**, every page says when a capture is running, **Headers only** keeps just the first 128 bytes of each packet, and capture files never leave this PC. Only capture networks you own or manage.
-- **Read-only system access.** The PowerShell script only reads network settings and changes nothing.
+## Command line
 
-## Project structure
-
-```text
-src/netpulse/
-├── __main__.py       entry point: builds the real adapters and starts the app
-├── domain.py         devices, check results, status and outage rules
-├── metrics.py        dashboard summary, search, filter and sort
-├── network.py        this PC's network settings as values
-├── topology.py       the map's tree, with each line's evidence
-├── charts.py         donut charts, bar lists and the status grid, drawn on the server
-├── checks.py         run_check and run_round
-├── scheduler.py      background check loop and hourly maintenance
-├── store.py          SQLite repository and schema upgrades
-├── discovery.py      subnet sweeps
-├── trace.py          path traces
-├── traffic.py        packet capture service
-├── outside.py        checks from outside through Globalping
-├── ping/             ping.exe adapter, output parser, IcmpSendEcho, host validation
-├── netinfo/          PowerShell network reader, parser, cache, name lookups
-├── capture/          Npcap adapter, header decoder, PCAP reader and writer
-├── probes/           Globalping client
-└── web/              Flask app, routes, forms, templates/ and static/
+```powershell
+netpulse [--db PATH] [--port N] [--local-only] [--open] [--debug]
+netpulse [--db PATH] reset-password NAME
+netpulse [--db PATH] users
 ```
+
+| Option | Description |
+| --- | --- |
+| `--db PATH` | The database file, created if missing. Defaults to `netpulse.db` in the current folder. |
+| `--port N` | The port for this run, instead of the one on the access page (5000). |
+| `--local-only` | Serve this PC only, over plain HTTP, whatever the access settings say. |
+| `--open` | Open NetPulse in the browser once it is listening. `NetPulse.bat` passes it. |
+| `--debug` | Flask's development server, on this PC only. For development. |
+
+`NetPulse.bat` passes anything after it to NetPulse. To install without it:
+
+```powershell
+python -m venv .venv
+.venv\Scripts\pip install .
+.venv\Scripts\netpulse.exe --db C:\NetPulse\netpulse.db --open
+```
+
+To start NetPulse with Windows, add a Task Scheduler task that runs `C:\NetPulse\.venv\Scripts\netpulse.exe` with `--db C:\NetPulse\netpulse.db`, **At startup**.
+
+## Your data
+
+- **`netpulse.db`** holds your devices, their history, accounts, sessions and alert settings. Passwords are stored only as Argon2id hashes and session tokens only as hashes. Keep the file private.
+- **`netpulse-tls`** holds NetPulse's certificate authority and its private key. Keep it as private as the database.
+- **`netpulse-captures`** holds packet captures. The last 50, or the last 30 days, are kept.
+- Single checks are kept 90 days by default (configurable in **settings**). Hourly totals and outages are kept for good, so long-range charts stay complete.
+
+NetPulse contacts only the devices you add, the notification channels you set up, and Globalping if an administrator turns it on. Globalping results are public, and private addresses are never sent there. Packet captures can contain sensitive data: one only starts when someone presses **Start**, and the files never leave the PC.
 
 ## Troubleshooting
 
-| Symptom | Cause and fix |
+| Problem | Fix |
 | --- | --- |
-| Every check shows `unreadable_output` | Windows' display language is not English, so `ping.exe` output cannot be read. Switch the display language to English. |
-| NetPulse exits at startup saying it runs on Windows only | NetPulse pings with Windows' `ping.exe`, so it runs on Windows only. |
-| Startup fails with "Port 5000 is in use by another program" | Another program is using that port. Start with `--port 5001` or another free port. |
-| My devices and history are gone | The default database is `netpulse.db` **in the current folder**. Start NetPulse from the folder you used before, or pass `--db` with a full path. The path in use is logged at startup. |
-| The status bar says **Monitoring is late** | No round finished for over a minute, for example after the PC slept. It recovers on its own on the next round. |
-| The network page or map says it cannot read the network settings | Windows PowerShell could not run. Monitoring carries on; the page says why. |
-| The traffic page says capture is unavailable | Npcap is missing, or was installed with **Restrict Npcap driver's access to Administrators only**. Reinstall Npcap with that option unticked. |
-| A host such as `192.168.1` or `010.0.0.1` is rejected | Shorthand addresses are refused on purpose, because Windows would ping a different address. Use the full dotted form. |
+| Another device can't open NetPulse | Check that network access is on, you're using the address the access page shows, and the firewall rule exists. On a network Windows marks Public, the rule doesn't apply; the access page shows how to change that. |
+| *netpulse.lan* "can't be reached" | Nothing points that name at this PC yet. Set it in your router or Pi-hole (the access page checks it), or use the address. |
+| Chrome still says "Not secure" after installing the authority | Restart Chrome (`chrome://restart`). Install the authority on every device you use. |
+| "This NetPulse does not answer to the name …" | Add the name on the access page, or use the address. |
+| Can't reach NetPulse after changing access | Start it with `--local-only` and fix the settings on this PC. |
+| "Too many failed sign-ins" | Wait 15 minutes, or sign in on the PC NetPulse runs on. |
+| "port 5000 is in use" | NetPulse is probably already running. Otherwise start with `--port 5001`. |
+| `NetPulse.bat` says it needs Python | Install Python 3.11+ with **Add python.exe to PATH** ticked. |
+| A device that is on shows Down | It ignores ping. Edit it and check a TCP port instead. |
+| My devices are gone | NetPulse opened a different database. Use the same `--db` path as before; it is logged at startup. |
+| The traffic page says capture is unavailable | Install Npcap with **Restrict Npcap driver's access to Administrators only** unticked. |
 
 ## Limitations
 
-- Windows only, and English Windows only for monitoring.
-- IPv4 addresses and hostnames only; no IPv6.
-- One check interval, 30 seconds, for every device.
-- No alerts or notifications, no login, and no access from other machines.
-- No SNMP, router APIs or UPnP, and no decoding of packet contents beyond their headers.
-- Deleted devices are hidden, not erased, and there is no undelete screen yet.
-- Check history is never pruned.
+- Windows only, IPv4 only.
+- Checks are ping or TCP; no HTTP, DNS, SNMP or certificate-expiry checks yet.
+- Local accounts only; no single sign-on.
+- Not a Windows service; use Task Scheduler to start it with Windows.
 
 ## Reference
 
 ### Check results
 
-A check is either a success with a round-trip time in whole milliseconds, or a failure with one of these codes:
+A check either succeeds with a round-trip time in whole milliseconds, or fails with one of these codes:
 
 | Code | Meaning |
 | --- | --- |
-| `timeout` | No reply within the wait time |
-| `unreachable` | A router reported the destination unreachable |
-| `name_resolution` | The hostname could not be resolved |
-| `transmit_failed` | The local network stack could not send the request |
+| `timeout` | No reply in time |
+| `unreachable` | The destination was unreachable, or the TCP port refused the connection |
+| `name_resolution` | The host name could not be resolved |
+| `transmit_failed` | This PC could not send the request |
 | `ttl_expired` | The packet expired in transit |
-| `unreadable_output` | `ping.exe` output was empty, non-English, or unrecognized |
-
-A reply faster than 1 ms (`time<1ms`) is stored as `0` ms. If `ping.exe` itself cannot run, nothing is stored: the round stops and the status bar shows the error.
+| `unreadable_output` | Only with the `ping.exe` fallback: its output could not be read |
 
 <details>
 <summary><strong>HTTP routes</strong></summary>
 
-Every `POST` needs the page's CSRF token, as the `csrf_token` form field or an `X-CSRF-Token` header. Requests sent by HTMX (`HX-Request: true`) get HTML fragments where noted.
+Every `POST` needs the page's CSRF token (`csrf_token` field or `X-CSRF-Token` header). Every route except sign-in and setup needs a session; *Needs* is the permission required beyond that.
 
-| Route | What it does |
-| --- | --- |
-| `GET /` | Overview: summary cards, problems, breakdown charts, slowest devices, recent events and the 24 h status grid |
-| `GET /devices` | Device table and the add form. Takes `q`, `status`, `sort` and `dir` |
-| `GET /devices/rows` | Device table body for the same parameters (polled every 30 s) |
-| `POST /devices` | Add a device (`name`, `host`) |
-| `GET /devices/<int:device_id>` | Device page. `range` is `1h`, `6h`, `24h` (default), `7d` or `30d` |
-| `GET /devices/<int:device_id>/edit` | Edit form |
-| `POST /devices/<int:device_id>/edit` | Save name, host and what the device connects through (`parent`) |
-| `POST /devices/<int:device_id>/check` | Check now |
-| `POST /devices/<int:device_id>/delete` | Hide the device and stop checking it; its history is kept |
-| `GET /settings` | Settings page |
-| `POST /settings` | Save the degraded thresholds (`latency_ms`, `failures`) |
-| `GET /status` | Monitoring status bar (polled every 10 s) |
-| `GET /network` | This PC's network settings and the router summary |
-| `POST /network/refresh` | Read the network settings again |
-| `GET /map` | Network map, drawn and as a list |
-| `GET /map/view` | The map's list and drawing data (polled every 30 s) |
-| `GET /discover` | Sweep form, last sweep and review list |
-| `GET /discover/view` | Sweep progress and review list (polled while a sweep runs) |
-| `POST /discover` | Start a sweep (`network`, and `confirm=yes` for a Public network) |
-| `POST /discover/<int:host_id>/accept` | Monitor a discovered host |
-| `POST /discover/<int:host_id>/ignore` | Ignore a discovered host |
-| `POST /discover/<int:host_id>/restore` | Put an ignored host back on the review list |
-| `GET /probe` | Path tab: trace form, newest trace and past traces |
-| `GET /probe/view` | Trace in progress or just finished (polled while it runs) |
-| `POST /probe/trace` | Trace the path to a host (`target`, `rounds`: 1, 5 or 10) |
-| `GET /probe/traces/<int:trace_id>` | A past trace |
-| `GET /probe/outside` | Outside tab: what is sent, the agreement, the check form and past checks |
-| `GET /probe/outside/view` | Check in progress or just finished (polled while it runs) |
-| `POST /probe/outside/consent` | Agree (`agree=yes`) or withdraw (`agree=no`) |
-| `POST /probe/outside/check` | Check a public host from outside (`kind`, `target`, `port`, `path`, `scope`, `probes`) |
-| `GET /probe/outside/checks/<int:check_id>` | A past check from outside |
-| `GET /traffic` | Traffic page: start, watch and list captures |
-| `GET /traffic/view` | Live part of the traffic page (polled while a capture runs) |
-| `POST /traffic/start` | Start a capture (`interface`, `preset`, `filter`, `headers_only=yes`) |
-| `POST /traffic/stop` | Stop the running capture |
-| `GET /traffic/<int:capture_id>` | Capture page, 100 packets at a time (`page`) |
-| `GET /traffic/<int:capture_id>/pcap` | Download the capture's PCAP file |
-| `POST /traffic/<int:capture_id>/delete` | Delete a finished capture and its file (`confirm=yes`) |
+| Route | What it does | Needs |
+| --- | --- | --- |
+| `GET /setup` | First-run setup, on this PC only, before any account exists | |
+| `POST /setup` | Create the administrator and sign in | |
+| `GET /login` | Sign-in form | |
+| `POST /login` | Sign in | |
+| `POST /logout` | Sign out | |
+| `GET /account` | Your account, permissions and sessions | |
+| `POST /account/password` | Change your password | |
+| `POST /account/sessions/<int:session_id>/revoke` | Sign out one of your sessions | |
+| `POST /account/sessions/revoke-others` | Sign out all your other sessions | |
+| `GET /` | Overview | |
+| `GET /devices` | Device table and add form | |
+| `GET /devices/rows` | Device table body (polled) | |
+| `POST /devices` | Add a device | `devices.manage` |
+| `GET /devices/<int:device_id>` | Device page | |
+| `GET /devices/<int:device_id>/edit` | Edit form | `devices.manage` |
+| `POST /devices/<int:device_id>/edit` | Save a device | `devices.manage` |
+| `POST /devices/<int:device_id>/check` | Check now | `checks.run` |
+| `POST /devices/<int:device_id>/pause` | Pause or resume | `devices.manage` |
+| `POST /devices/<int:device_id>/delete` | Delete, keeping history | `devices.manage` |
+| `GET /devices/deleted` | Deleted devices | |
+| `POST /devices/<int:device_id>/restore` | Restore a deleted device | `devices.manage` |
+| `POST /devices/<int:device_id>/purge` | Erase a deleted device and its history | `devices.manage` |
+| `GET /devices/groups` | Groups | |
+| `POST /devices/groups` | Add a group | `devices.manage` |
+| `POST /devices/groups/<int:group_id>` | Rename a group | `devices.manage` |
+| `POST /devices/groups/<int:group_id>/delete` | Delete a group | `devices.manage` |
+| `GET /devices/import` | Import form | `devices.manage` |
+| `POST /devices/import` | Import devices from CSV | `devices.manage` |
+| `GET /devices/export.csv` | Export devices as CSV | |
+| `GET /status` | Status bar (polled) | |
+| `GET /alerts` | Open and past alerts | |
+| `POST /alerts/<int:alert_id>/ack` | Acknowledge an alert | `alerts.ack` |
+| `POST /alerts/ack-all` | Acknowledge every open alert | `alerts.ack` |
+| `GET /reports` | Availability report | |
+| `GET /reports.csv` | Availability report as CSV | |
+| `GET /settings` | Settings | |
+| `POST /settings` | Save degraded thresholds | `settings.manage` |
+| `POST /settings/retention` | Save retention | `settings.manage` |
+| `POST /settings/discovery` | Save the sweep schedule | `settings.manage` |
+| `GET /settings/access` | Network access | `settings.manage` |
+| `POST /settings/access` | Save and apply network access | `settings.manage` |
+| `POST /settings/access/certificate` | Make a new server certificate | `settings.manage` |
+| `GET /settings/access/authority.crt` | Download the certificate authority (never its key) | |
+| `GET /settings/users` | Accounts | `users.manage` |
+| `POST /settings/users` | Add an account | `users.manage` |
+| `GET /settings/users/<int:user_id>` | One account | `users.manage` |
+| `POST /settings/users/<int:user_id>` | Save an account | `users.manage` |
+| `POST /settings/users/<int:user_id>/password` | Set a temporary password | `users.manage` |
+| `POST /settings/users/<int:user_id>/sessions/revoke` | Sign an account out everywhere | `users.manage` |
+| `POST /settings/users/<int:user_id>/delete` | Delete an account | `users.manage` |
+| `GET /settings/audit` | Audit log | `users.manage` |
+| `GET /settings/alerts` | Alert rules and channels | `alerts.manage` |
+| `POST /settings/alerts` | Save alert rules | `alerts.manage` |
+| `POST /settings/alerts/channels` | Add a channel | `alerts.manage` |
+| `GET /settings/alerts/channels/<int:channel_id>` | Edit a channel | `alerts.manage` |
+| `POST /settings/alerts/channels/<int:channel_id>` | Save a channel | `alerts.manage` |
+| `POST /settings/alerts/channels/<int:channel_id>/test` | Send a test message | `alerts.manage` |
+| `POST /settings/alerts/channels/<int:channel_id>/delete` | Delete a channel | `alerts.manage` |
+| `GET /network` | This PC's network settings | |
+| `POST /network/refresh` | Read the network settings again | `diagnostics.run` |
+| `GET /map` | Network map | |
+| `GET /map/view` | Map data (polled) | |
+| `GET /discover` | Discovery | |
+| `GET /discover/view` | Sweep progress (polled) | |
+| `POST /discover` | Start a sweep | `discovery.run` |
+| `POST /discover/<int:host_id>/accept` | Monitor a discovered host | `devices.manage` |
+| `POST /discover/<int:host_id>/ignore` | Ignore a discovered host | `devices.manage` |
+| `POST /discover/<int:host_id>/restore` | Un-ignore a host | `devices.manage` |
+| `GET /probe` | Path traces | |
+| `GET /probe/view` | Trace progress (polled) | |
+| `POST /probe/trace` | Start a trace | `diagnostics.run` |
+| `GET /probe/traces/<int:trace_id>` | A past trace | |
+| `GET /probe/outside` | Checks from outside | |
+| `GET /probe/outside/view` | Check progress (polled) | |
+| `POST /probe/outside/consent` | Turn Globalping on or off | `settings.manage` |
+| `POST /probe/outside/check` | Check a public host from outside | `outside.run` |
+| `GET /probe/outside/checks/<int:check_id>` | A past check from outside | |
+| `GET /traffic` | Packet capture | `capture.view` |
+| `GET /traffic/view` | Live capture (polled) | `capture.view` |
+| `POST /traffic/start` | Start a capture | `capture.run` |
+| `POST /traffic/stop` | Stop the capture | `capture.run` |
+| `GET /traffic/<int:capture_id>` | A capture's packets | `capture.view` |
+| `GET /traffic/<int:capture_id>/pcap` | Download a capture | `capture.view` |
+| `POST /traffic/<int:capture_id>/delete` | Delete a capture | `capture.run` |
 
 </details>
 
 ## License
 
-NetPulse is free software, licensed under the **GNU General Public License v3.0** (SPDX: `GPL-3.0-only`). See [LICENSE](LICENSE) for the full text.
+[GPL-3.0-only](LICENSE). Copyright (C) 2026 the NetPulse authors.
 
-Copyright (C) 2026 the NetPulse authors.
-
-This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-
-## Acknowledgments
-
-NetPulse bundles or relies on these projects. Licence files for the bundled ones ship in `src/netpulse/web/static/`.
-
-- [Flask](https://flask.palletsprojects.com/), the web framework.
-- [HTMX](https://htmx.org/) for in-place page updates.
-- [uPlot](https://github.com/leeoniya/uPlot) (MIT) for latency and traffic charts.
-- [Cytoscape.js](https://js.cytoscape.org/) (MIT) for the network map.
-- [IBM Plex Mono](https://github.com/IBM/plex) (SIL Open Font License 1.1), the interface typeface.
-- [Npcap](https://npcap.com/) for packet capture, installed separately.
-- [Globalping](https://globalping.io/) for checks from outside, a free public service.
+Built with [Flask](https://flask.palletsprojects.com/), [cheroot](https://cheroot.cherrypy.dev/), [argon2-cffi](https://argon2-cffi.readthedocs.io/), [cryptography](https://cryptography.io/), [HTMX](https://htmx.org/), [uPlot](https://github.com/leeoniya/uPlot), [Cytoscape.js](https://js.cytoscape.org/) and [IBM Plex Mono](https://github.com/IBM/plex); their licences are in `src/netpulse/web/static/`. Packet capture uses [Npcap](https://npcap.com/), and checks from outside use [Globalping](https://globalping.io/).

@@ -8,3 +8,6 @@ src/netpulse/web/static/*.min.css -text
 
 # Bundled fonts, pinned by hash like the vendored scripts.
 *.woff2 binary
+
+# Windows reads batch files line by line and needs CRLF to find their labels.
+*.bat text eol=crlf

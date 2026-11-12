@@ -8,13 +8,15 @@
 <div class="page-head">
   <div>
     {{ prompt("Network", "network") }}
-    <p class="dim">This PC's network settings, as Windows reports them.</p>
+    <p class="dim">The network settings of the PC NetPulse runs on, as Windows reports them.</p>
   </div>
   <div class="form-actions">
+    {%- if can(Permission.DIAGNOSTICS_RUN) %}
     <form method="post" action="{{ url_for('netpulse.refresh_network') }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button type="submit">Refresh</button>
     </form>
+    {%- endif %}
     <a class="button" href="{{ url_for('netpulse.topology_map') }}">Map</a>
   </div>
 </div>
@@ -80,14 +82,17 @@
       {{ row_status(gateway_row) }}
       {%- if gateway_row.latency_ms is not none and gateway_row.state == "up" %} <span class="detail">{{ gateway_row.latency_ms }} ms</span>{% endif %}
       {%- if gateway_row.availability.checks %} · {{ gateway_row.availability|percent }} of checks up, 24 h{% endif %}
-    {%- else %}
-      {# Plan section 19: offer to monitor the gateway, through the ordinary add route. #}
+    {%- elif can(Permission.DEVICES_MANAGE) %}
+      {# Plan section 19: offer to monitor the gateway, through the ordinary add route.
+         Its type is a fact here: Windows reports this address as the default gateway. #}
       <form class="monitor-gateway" method="post" action="{{ url_for('netpulse.add_device') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="name" value="Gateway">
         <input type="hidden" name="host" value="{{ gateway }}">
+        <input type="hidden" name="kind" value="router">
         <p>Not monitored. <button type="submit" class="primary">Monitor the gateway</button></p>
       </form>
+    {%- else %}Not monitored.
     {%- endif %}
   </dd>
 </dl>

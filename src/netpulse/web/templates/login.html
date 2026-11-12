@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% from "_macros.html" import error_summary, invalid, prompt %}
+
+{% block title %}Sign in · NetPulse{% endblock %}
+
+{# Plan section 36. One answer for an unknown username and a wrong password. #}
+{% block content %}
+<div class="gate">
+  {{ prompt("Sign in", "login") }}
+  <form class="device-form stack" method="post" action="{{ url_for('netpulse.sign_in') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="next" value="{{ next }}">
+    {{ error_summary(form) }}
+    <label>Username
+      <input name="username" value="{{ form.username }}" id="field-username" required maxlength="64" autofocus
+             autocomplete="username" autocapitalize="off" spellcheck="false"{% if form.error %} aria-invalid="true"{% endif %}>
+    </label>
+    <label>Password
+      <input name="password" type="password" id="field-password" required maxlength="256" autocomplete="current-password"
+             {%- if form.error %} aria-invalid="true"{% endif %}>
+    </label>
+    <div class="form-actions">
+      <button type="submit" class="primary">Sign in</button>
+    </div>
+  </form>
+  <p class="hint">
+    Lost your password? An administrator can reset it. If you are the administrator, run
+    <code>netpulse reset-password NAME</code> on the PC NetPulse runs on.
+  </p>
+</div>
+{% endblock %}

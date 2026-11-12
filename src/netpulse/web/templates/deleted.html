@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf, device_tabs, prompt %}
+{% set active_tab = "devices" %}
+
+{% block title %}Deleted devices · NetPulse{% endblock %}
+
+{# Plan section 39: deleting a device hides it and stops its checks. Its history is
+   kept until someone erases it here. #}
+{% block content %}
+{{ prompt("Deleted devices", "devices", flags="--deleted") }}
+{{ device_tabs("deleted", devices|length) }}
+{%- set manage = can(Permission.DEVICES_MANAGE) %}
+<p class="dim">A deleted device is not checked, but its history is kept. Restore brings it back as it was. Erase removes it and its history for good.</p>
+
+{% if error %}
+<div class="error-summary" role="alert"><strong>There is a problem.</strong> {{ error }}</div>
+{% endif %}
+
+<div class="table-wrap">
+  <table class="deleted">
+    <thead>
+      <tr><th scope="col">Name</th><th scope="col">Host</th><th scope="col" class="col-optional">Added</th><th scope="col">Deleted</th>{% if manage %}<th scope="col"><span class="visually-hidden">Actions</span></th>{% endif %}</tr>
+    </thead>
+    <tbody>
+      {%- for device in devices %}
+      <tr>
+        <td><span class="name-cut" title="{{ device.name }}">{{ device.name }}</span></td>
+        <td>{{ device.host }}</td>
+        <td class="col-optional">{{ device.created_at|localtime }}</td>
+        <td>{{ device.deleted_at|localtime }}</td>
+        {%- if manage %}
+        <td class="actions">
+          <form method="post" action="{{ url_for('netpulse.restore_device', device_id=device.id) }}">
+            {{ csrf() }}
+            <button type="submit">Restore</button>
+          </form>
+          <form class="erase" method="post" action="{{ url_for('netpulse.purge_device', device_id=device.id) }}">
+            {{ csrf() }}
+            <label class="check"><input type="checkbox" name="confirm" value="yes" required aria-label="Confirm erasing {{ device.name }} for good"> for good</label>
+            <button type="submit" class="danger">Erase</button>
+          </form>
+        </td>
+        {%- endif %}
+      </tr>
+      {%- else %}
+      <tr class="empty"><td colspan="{{ 5 if manage else 4 }}">No deleted devices.</td></tr>
+      {%- endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

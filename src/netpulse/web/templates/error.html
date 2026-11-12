@@ -12,6 +12,6 @@
   {%- if code >= 500 %}
   <p class="hint">This is about this PC or NetPulse, not about your devices. Their history is unchanged.</p>
   {%- endif %}
-  <p><a href="{{ url_for('netpulse.overview') }}">Back to the overview</a></p>
+  <p><a href="{{ url_for('netpulse.overview') }}">{{ "Back to the overview" if current_user() else "Sign in" }}</a></p>
 </div>
 {% endblock %}

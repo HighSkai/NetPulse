@@ -22,6 +22,7 @@
     <p class="dim">{{ device.host }}</p>
   </div>
   <div class="form-actions">
+    {%- if can(Permission.CHECKS_RUN) and not device.paused %}
     <form method="post" action="{{ url_for('netpulse.check_device', device_id=device.id) }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="return" value="device">
@@ -30,20 +31,37 @@
       {%- endfor %}
       <button type="submit">Check now</button>
     </form>
+    {%- endif %}
     {#- Plan section 30: trace the path to it. #}
+    {%- if can(Permission.DIAGNOSTICS_RUN) %}
     <form method="post" action="{{ url_for('netpulse.start_trace') }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="target" value="{{ device.host }}">
       <button type="submit">Trace</button>
     </form>
+    {%- endif %}
+    {%- if can(Permission.DEVICES_MANAGE) %}
+    <form method="post" action="{{ url_for('netpulse.pause_device', device_id=device.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="return" value="device">
+      <input type="hidden" name="paused" value="{{ 'no' if device.paused else 'yes' }}">
+      <button type="submit">{{ "Resume checks" if device.paused else "Pause checks" }}</button>
+    </form>
     <a class="button" href="{{ url_for('netpulse.edit_device', device_id=device.id, **view.params) }}">Edit</a>
+    {%- endif %}
   </div>
 </div>
+
+{% if device.paused %}
+<div class="notice" role="note">
+  <p><strong><span aria-hidden="true">‖</span> Paused.</strong> NetPulse is not checking this device and will not alert on it. What is below is from before it was paused.</p>
+</div>
+{% endif %}
 
 {% set latest = row.status.latest %}
 <section class="summary facts" aria-label="Facts">
   <div class="stat stat-wide">
-    <span class="stat-value">{% if row.state == "degraded" %}{{ row_status(row) }}{% else %}{{ status_label(latest) }}{% endif %}</span>
+    <span class="stat-value">{% if row.state in ("degraded", "paused") %}{{ row_status(row) }}{% else %}{{ status_label(latest) }}{% endif %}</span>
     <span class="stat-label">status</span>
   </div>
   <div class="stat">
@@ -51,7 +69,7 @@
     <span class="stat-label">last checked</span>
   </div>
   <div class="stat">
-    <span class="stat-value stat-small">{{ last_up.checked_at|localtime if last_up else "never" }}</span>
+    <span class="stat-value stat-small">{{ last_up|localtime if last_up else "never" }}</span>
     <span class="stat-label">last up</span>
   </div>
   <div class="stat">
@@ -72,6 +90,29 @@
   {% endfor %}
 </section>
 
+{# Plan section 39: the inventory, only the rows that say something. #}
+<section aria-labelledby="about-heading">
+  <h2 id="about-heading">About</h2>
+  <dl class="facts-list">
+    <dt>Checked by</dt>
+    <dd>{{ "a TCP connection to port " ~ device.check_port if device.check_kind == "tcp" else "ping" }}, every {{ device.interval_s|duration }}
+      {%- if device.alerts_muted %} · <span class="tag tag-warn">alerts muted</span>{% endif %}</dd>
+    {%- if device.kind != "unknown" %}<dt>Type</dt><dd>{{ device.kind_label }}</dd>{% endif %}
+    {%- if group %}<dt>Group</dt><dd><a href="{{ url_for('netpulse.dashboard', group=device.group_id) }}">{{ group }}</a></dd>{% endif %}
+    {%- if device.vendor or device.model %}<dt>Make</dt><dd>{{ [device.vendor, device.model]|select|join(" · ") }}</dd>{% endif %}
+    {%- if device.location %}<dt>Location</dt><dd>{{ device.location }}</dd>{% endif %}
+    {%- if device.mac %}<dt>MAC address</dt><dd>{{ device.mac }}</dd>{% endif %}
+    {%- if found %}
+    <dt>On the network</dt>
+    <dd>first seen by a sweep {{ found.first_seen|localtime }}, last seen {{ found.last_seen|localtime }}
+      {%- if found.address|string != device.host and device.host.replace(".", "").isdigit() %}
+      <span class="moved" role="note">A sweep last saw this device at {{ found.address }}, not {{ device.host }}.</span>{% endif %}</dd>
+    {%- endif %}
+    {%- if device.tags %}<dt>Tags</dt><dd>{% for tag in device.tags %}<a class="tag" href="{{ url_for('netpulse.dashboard', tag=tag) }}">{{ tag }}</a> {% endfor %}</dd>{% endif %}
+    {%- if device.notes %}<dt>Notes</dt><dd class="notes">{{ device.notes }}</dd>{% endif %}
+  </dl>
+</section>
+
 {# Plan section 18: say why, next to the threshold that was crossed. #}
 {% if row.state == "degraded" %}
 <div class="notice" role="note">
@@ -84,7 +125,7 @@
       <li>{{ row.recent.failures }} of its last {{ row.recent.checks }} checks failed, and {{ thresholds.failures }} or more count as degraded.</li>
     {% endif %}
   </ul>
-  <p><a href="{{ url_for('netpulse.settings') }}">Change the thresholds</a></p>
+  {% if can(Permission.SETTINGS_MANAGE) %}<p><a href="{{ url_for('netpulse.settings') }}">Change the thresholds</a></p>{% endif %}
 </div>
 {% endif %}
 

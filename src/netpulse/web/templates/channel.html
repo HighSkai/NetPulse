@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf, prompt %}
+{% set active_tab = "settings" %}
+
+{% block title %}{{ channel.name }} · Alert settings · NetPulse{% endblock %}
+
+{% block content %}
+<p><a href="{{ url_for('netpulse.alert_settings') }}">&larr; Alert settings</a></p>
+{{ prompt("Channel " ~ channel.name, "channel", target=channel.name, flags="--edit") }}
+<form class="device-form" method="post" action="{{ url_for('netpulse.update_channel', channel_id=channel.id) }}">
+  {{ csrf() }}
+  {%- if error %}
+  <div class="error-summary" role="alert"><strong>There is a problem.</strong> {{ error }}</div>
+  {%- endif %}
+  {%- set kind = channel.kind %}
+  {% include "_channel_fields.html" %}
+  <label class="check"><input type="checkbox" name="enabled" value="yes"{% if channel.enabled %} checked{% endif %}> On: send messages through this channel</label>
+  <div class="form-actions">
+    <button type="submit" class="primary">Save</button>
+    <a class="button" href="{{ url_for('netpulse.alert_settings') }}">Cancel</a>
+  </div>
+</form>
+
+<section aria-labelledby="delete-heading">
+  <h2 id="delete-heading">Delete</h2>
+  <form method="post" action="{{ url_for('netpulse.delete_channel', channel_id=channel.id) }}"
+        data-confirm="Delete the channel {{ channel.name }}? Nothing more is sent through it.">
+    {{ csrf() }}
+    <button type="submit" class="danger">Delete channel</button>
+  </form>
+</section>
+{% endblock %}

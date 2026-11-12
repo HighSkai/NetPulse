@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf, error_summary, field_error, invalid, prompt, settings_tabs %}
+{% set active_tab = "settings" %}
+
+{% block title %}Users · NetPulse{% endblock %}
+
+{# Plan section 35: accounts, roles and what each may do. #}
+{% block content %}
+{{ prompt("Users", "settings", flags="--users") }}
+{{ settings_tabs("users") }}
+
+{% if handed %}
+<div class="notice handed" role="alert">
+  <p><strong>Account {{ handed[0].username }} is ready.</strong> Its temporary password is shown once, here:</p>
+  <p><code class="secret">{{ handed[1] }}</code></p>
+  <p>Give it to them some way you trust. NetPulse asks them for a password of their own the first time they sign in.</p>
+</div>
+{% endif %}
+
+<div class="table-wrap">
+  <table class="users">
+    <thead>
+      <tr>
+        <th scope="col">Username</th>
+        <th scope="col">Role</th>
+        <th scope="col" class="col-optional">May also</th>
+        <th scope="col">Last signed in</th>
+        <th scope="col" class="num">Sessions</th>
+        <th scope="col"><span class="visually-hidden">Actions</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      {%- for u in users %}
+      <tr>
+        <td><a href="{{ url_for('netpulse.user_page', user_id=u.id) }}">{{ u.username }}</a>
+          {%- if u.id == current_user().id %} <span class="tag">you</span>{% endif %}
+          {%- if not u.active %} <span class="tag tag-warn">disabled</span>{% endif %}
+          {%- if u.must_change_password %} <span class="tag">temporary password</span>{% endif %}</td>
+        <td>{{ u.role_label }}</td>
+        <td class="col-optional">{% if u.is_admin %}everything{% elif u.permissions %}{{ u.permissions|length }} more {{ "thing" if u.permissions|length == 1 else "things" }}{% else %}nothing: view only{% endif %}</td>
+        <td>{{ u.last_login_at|localtime if u.last_login_at else "Never" }}</td>
+        <td class="num">{{ sessions[u.id] }}</td>
+        <td class="actions"><a class="button" href="{{ url_for('netpulse.user_page', user_id=u.id) }}">Manage</a></td>
+      </tr>
+      {%- endfor %}
+    </tbody>
+  </table>
+</div>
+
+<section aria-labelledby="add-user-heading">
+  <h2 id="add-user-heading">Add an account</h2>
+  <form class="device-form" method="post" action="{{ url_for('netpulse.create_user') }}">
+    {{ csrf() }}
+    {{ error_summary(form) }}
+    <label>Username
+      <input name="username" value="{{ form.username }}" id="field-username" required minlength="3" maxlength="32"
+             autocomplete="off" autocapitalize="off" spellcheck="false"{{ invalid(form, "username") }}>
+      {{ field_error(form, "username") }}
+    </label>
+    <label>Role
+      <select name="role" id="field-role"{{ invalid(form, "role") }}>
+        {%- for value, label in roles.items()|reverse %}
+        <option value="{{ value }}"{% if value == form.role %} selected{% endif %}>{{ label }}</option>
+        {%- endfor %}
+      </select>
+      {{ field_error(form, "role") }}
+    </label>
+    <label>Password
+      <input name="password" type="password" id="field-password" maxlength="256" autocomplete="new-password"
+             placeholder="leave empty for a temporary one"{{ invalid(form, "password") }}>
+      {{ field_error(form, "password") }}
+      <span class="hint">At least {{ password_min }} characters, or empty: NetPulse then makes one and shows it once.</span>
+    </label>
+    <fieldset class="checks" id="field-permissions">
+      <legend>A viewer may also</legend>
+      {%- for key, label in grantable.items() %}
+      <label class="check"><input type="checkbox" name="permissions" value="{{ key }}"{% if key in form.permissions %} checked{% endif %}> {{ label }}</label>
+      {%- endfor %}
+      <p class="hint">A viewer looks at everything except packet captures and changes nothing, apart from what is ticked. An administrator may do everything, so these do not apply.</p>
+    </fieldset>
+    <div class="form-actions"><button type="submit" class="primary">Add account</button></div>
+  </form>
+</section>
+{% endblock %}

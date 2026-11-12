@@ -22,6 +22,9 @@
   {%- if not available %}
   <p class="form-error" role="alert">Tracing is off in this NetPulse.</p>
   {%- endif %}
+  {%- if not can(Permission.DIAGNOSTICS_RUN) %}
+  <p class="dim">Your account may look at past traces, and not start one.</p>
+  {%- else %}
   <form class="device-form trace-form" method="post" action="{{ url_for('netpulse.start_trace') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     {{ error_summary(form) }}
@@ -43,6 +46,7 @@
       so a round takes about a second. More rounds show which hops really lose packets, and where the path slows down.
     </p>
   </form>
+  {%- endif %}
 </section>
 
 {% include "_probe_view.html" %}

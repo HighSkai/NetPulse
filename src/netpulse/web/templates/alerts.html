@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf, prompt %}
+{% set active_tab = "alerts" %}
+
+{% block title %}Alerts · NetPulse{% endblock %}
+
+{# Plan section 41: what is wrong now, what was, and who has seen it. #}
+{% macro severity(alert) -%}
+  {%- if alert.severity == "critical" %}<span class="state state-down"><span class="glyph" aria-hidden="true">✕</span> Critical</span>
+  {%- elif alert.severity == "warning" %}<span class="state state-degraded"><span class="glyph" aria-hidden="true">▲</span> Warning</span>
+  {%- else %}<span class="state state-unknown"><span class="glyph" aria-hidden="true">○</span> Info</span>{% endif %}
+{%- endmacro %}
+{% macro subject(alert) -%}
+  {%- if alert.device_id %}<a class="name-cut" href="{{ url_for('netpulse.device_detail', device_id=alert.device_id) }}" title="{{ alert.subject }}">{{ alert.subject }}</a>
+  {%- else %}<span class="name-cut" title="{{ alert.subject }}">{{ alert.subject }}</span>{% endif %}
+{%- endmacro %}
+{% macro lasted(alert, until) -%}
+  {{ ((until - alert.opened_at|as_datetime).total_seconds()|int, 0)|max|duration }}
+{%- endmacro %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    {{ prompt("Alerts", "alerts") }}
+    <p class="dim">An alert opens when a device has failed two checks in a row, and closes when it answers again.</p>
+  </div>
+  <div class="form-actions">
+    {%- if can(Permission.ALERTS_ACK) and open|rejectattr("acked")|list %}
+    <form method="post" action="{{ url_for('netpulse.ack_all_alerts') }}">
+      {{ csrf() }}
+      <button type="submit">Acknowledge all</button>
+    </form>
+    {%- endif %}
+    {%- if can(Permission.ALERTS_MANAGE) %}
+    <a class="button" href="{{ url_for('netpulse.alert_settings') }}">Rules and channels</a>
+    {%- endif %}
+  </div>
+</div>
+
+<div id="alerts-view" hx-get="{{ url_for('netpulse.alerts_page') }}" hx-trigger="every {{ refresh_s }}s" hx-select="#alerts-view" hx-swap="outerHTML">
+  <section aria-labelledby="open-heading">
+    <h2 id="open-heading">Open ({{ open|length }})</h2>
+    {%- if open %}
+    <div class="table-wrap">
+      <table class="alerts">
+        <thead>
+          <tr><th scope="col">Severity</th><th scope="col">About</th><th scope="col">What</th><th scope="col">Since</th><th scope="col" class="num">For</th><th scope="col">Seen by</th></tr>
+        </thead>
+        <tbody>
+          {%- for alert in open %}
+          <tr{% if not alert.acked %} class="unacked"{% endif %}>
+            <td>{{ severity(alert) }}</td>
+            <td>{{ subject(alert) }}</td>
+            <td>{{ alert.label }}{% if alert.detail %} <span class="detail">{{ alert.detail }}</span>{% endif %}</td>
+            <td><time datetime="{{ alert.opened_at }}">{{ alert.opened_at|localtime }}</time></td>
+            <td class="num">{{ lasted(alert, now) }}</td>
+            <td class="actions">
+              {%- if alert.acked %}{{ alert.acked_by }}
+              {%- elif can(Permission.ALERTS_ACK) %}
+              <form method="post" action="{{ url_for('netpulse.ack_alert', alert_id=alert.id) }}">
+                {{ csrf() }}
+                <button type="submit">Acknowledge</button>
+              </form>
+              {%- else %}<span class="dim">nobody yet</span>{% endif %}
+            </td>
+          </tr>
+          {%- endfor %}
+        </tbody>
+      </table>
+    </div>
+    {%- else %}
+    <p class="all-clear"><span class="state state-up"><span class="glyph" aria-hidden="true">●</span> Nothing is open.</span></p>
+    {%- endif %}
+    {%- if can(Permission.ALERTS_MANAGE) and not channels %}
+    <p class="hint">Alerts show here and nowhere else: no notification channel is set up.
+      <a href="{{ url_for('netpulse.alert_settings') }}">Add a webhook, Discord or email</a> to be told.</p>
+    {%- endif %}
+  </section>
+
+  <section aria-labelledby="past-heading">
+    <h2 id="past-heading">Past alerts</h2>
+    <div class="table-wrap">
+      <table class="alerts">
+        <thead>
+          <tr><th scope="col">Severity</th><th scope="col">About</th><th scope="col">What</th><th scope="col">Opened</th><th scope="col" class="num">Lasted</th><th scope="col" class="col-optional">Seen by</th></tr>
+        </thead>
+        <tbody>
+          {%- for alert in recent %}
+          <tr>
+            <td>{{ severity(alert) }}</td>
+            <td>{{ subject(alert) }}</td>
+            <td>{{ alert.label }}{% if alert.detail %} <span class="detail">{{ alert.detail }}</span>{% endif %}</td>
+            <td><time datetime="{{ alert.opened_at }}">{{ alert.opened_at|localtime }}</time></td>
+            <td class="num">{% if alert.kind == "new_host" %}—{% else %}{{ lasted(alert, alert.closed_at|as_datetime) }}{% endif %}</td>
+            <td class="col-optional">{{ alert.acked_by or "—" }}</td>
+          </tr>
+          {%- else %}
+          <tr class="empty"><td colspan="6">No alerts yet.</td></tr>
+          {%- endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="hint">The last 100. Closed alerts are kept for a year.</p>
+  </section>
+
+  {%- if notifications %}
+  <section aria-labelledby="sent-heading">
+    <h2 id="sent-heading">Messages sent</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th scope="col">When</th><th scope="col">Channel</th><th scope="col">Message</th><th scope="col">Delivered</th></tr></thead>
+        <tbody>
+          {%- for sent in notifications %}
+          <tr>
+            <td>{{ sent.at|localtime }}</td>
+            <td>{{ sent.channel_name }}</td>
+            <td>{{ sent.summary }}</td>
+            <td>{% if sent.ok %}<span class="state state-up"><span class="glyph" aria-hidden="true">●</span> Yes</span>{% else %}<span class="state state-down"><span class="glyph" aria-hidden="true">✕</span> No</span> <span class="detail">{{ sent.error }}</span>{% endif %}</td>
+          </tr>
+          {%- endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {%- endif %}
+</div>
+{% endblock %}

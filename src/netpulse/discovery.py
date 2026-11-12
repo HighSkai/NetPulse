@@ -5,6 +5,11 @@ reads Windows' neighbour table for MAC addresses, looks up names, and writes
 what it found to the review list. Nothing is monitored until the user
 accepts it. One sweep runs at a time, on its own thread, never inside the
 check round.
+
+Plan section 41 adds sweeps on a schedule: off unless an administrator turns
+them on for one subnet. A scheduled sweep only ever covers that subnet while
+this PC is still on it, so a laptop carried to another network sweeps nothing
+there, and it raises an alert for each host it has never seen before.
 """
 
 from __future__ import annotations
@@ -20,15 +25,20 @@ from ipaddress import IPv4Address, IPv4Network
 
 from netpulse.netinfo import NetworkInfoUnavailable, NetworkReader
 from netpulse.netinfo.names import Lookups
-from netpulse.network import Category, FoundHost, NetworkInfo
+from netpulse.network import Category, DiscoveredHost, FoundHost, NetworkInfo
 from netpulse.ping.result import Pinger, PingerUnavailable
 from netpulse.store import Store
 
-# Probes in flight at once: a whole /24. Most addresses are empty and each
-# costs a full wait, so the sweep takes about one wait. Measured on a real
-# /24: 64 at once took 6.2 s, 128 took 4.0 s, all of them 3.0 s, and each
-# found the same hosts (plan section 21).
-SWEEP_WORKERS = 256
+# Probes in flight at once. Most addresses are empty and each costs a full
+# wait. Measured on a real /24: 64 at once took 6.2 s, 128 took 4.0 s, all 256
+# took 3.0 s, and each found the same hosts (plan section 21). Since plan
+# section 40 the sweep takes the three seconds longer: 254 lookups in one burst
+# is more than some home routers and access points like, and nobody is waiting
+# on a scheduled sweep.
+SWEEP_WORKERS = 64
+# Plan section 41: how often a scheduled sweep may run, in minutes. 0 is off.
+SCHEDULES_MIN = (0, 60, 360, 1440)
+SCHEDULE_KEY, SCHEDULE_NETWORK_KEY = "discovery.every_min", "discovery.network"
 # A host's name is looked up the moment it answers ping. After the neighbour
 # table is read, the sweep waits at most this long for the rest.
 NAME_WAIT_S = 0.5
@@ -117,8 +127,11 @@ class Sweeper:
         name_wait_s: float = NAME_WAIT_S,
         clock: Callable[[], float] = time.monotonic,
         now: Callable[[], datetime] = _utc_now,
+        on_new_hosts: Callable[[Store, list[DiscoveredHost]], object] | None = None,
     ) -> None:
+        """on_new_hosts gets the hosts a scheduled sweep had never seen before (plan section 41)."""
         self._open_store = open_store
+        self._on_new_hosts = on_new_hosts
         self._pinger = pinger
         self._network = network
         self._lookup_name = lookup_name
@@ -134,13 +147,18 @@ class Sweeper:
         with self._lock:
             return self._status
 
-    def start(self, target: SweepTarget) -> bool:
-        """Start a sweep on its own thread. False, and nothing starts, if one is running."""
+    def start(self, target: SweepTarget, *, scheduled: bool = False) -> bool:
+        """Start a sweep on its own thread. False, and nothing starts, if one is running.
+
+        scheduled marks a sweep nobody is watching: it reports the hosts it had never seen.
+        """
         with self._lock:
             if self._status.state == SweepState.RUNNING:
                 return False
             self._status = SweepStatus(SweepState.RUNNING, target.network, total=len(target.addresses))
-            self._thread = threading.Thread(target=self._run, args=(target,), name="netpulse-sweep", daemon=True)
+            self._thread = threading.Thread(
+                target=self._run, args=(target, scheduled), name="netpulse-sweep", daemon=True
+            )
         self._thread.start()
         return True
 
@@ -149,17 +167,17 @@ class Sweeper:
         if self._thread is not None:
             self._thread.join(timeout)
 
-    def run(self, target: SweepTarget) -> SweepStatus:
+    def run(self, target: SweepTarget, *, scheduled: bool = False) -> SweepStatus:
         """One sweep, on this thread. start() runs this on its own."""
         with self._lock:
             self._status = SweepStatus(SweepState.RUNNING, target.network, total=len(target.addresses))
-        self._run(target)
+        self._run(target, scheduled)
         return self.status()
 
-    def _run(self, target: SweepTarget) -> None:
+    def _run(self, target: SweepTarget, scheduled: bool = False) -> None:
         started = self._clock()
         try:
-            status = self._sweep(target)
+            status = self._sweep(target, scheduled)
         except PingerUnavailable as exc:
             status = replace(self.status(), state=SweepState.FAILED, error=f"NetPulse cannot ping from this PC: {exc}")
         except Exception:
@@ -169,7 +187,7 @@ class Sweeper:
         with self._lock:
             self._status = status
 
-    def _sweep(self, target: SweepTarget) -> SweepStatus:
+    def _sweep(self, target: SweepTarget, scheduled: bool = False) -> SweepStatus:
         names = Lookups(self._lookup_name)
         answered = self._ping_all(target.addresses, names)
 
@@ -191,7 +209,9 @@ class Sweeper:
         found = [FoundHost(a, neighbours.get(a), named.get(a), a in answered) for a in addresses]
         store = self._open_store()
         try:
-            store.record_sweep(found)
+            new = store.record_sweep(found)
+            if scheduled and new and self._on_new_hosts is not None:
+                self._on_new_hosts(store, new)
         finally:
             store.close()
         return replace(
@@ -216,3 +236,51 @@ class Sweeper:
             for future in [pool.submit(probe, a) for a in addresses]:
                 future.result()  # re-raises PingerUnavailable
         return answered
+
+
+class SweepSchedule:
+    """Sweeps on a schedule (plan section 41). The check loop calls tick() between rounds.
+
+    The settings name one subnet and how often. A sweep starts only when that
+    subnet is still one of this PC's, and Windows does not mark its network
+    Public: NetPulse never sweeps a network it was not told is the user's own.
+    """
+
+    def __init__(
+        self,
+        sweeper: Sweeper,
+        open_store: Callable[[], Store],
+        network: NetworkReader,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._sweeper = sweeper
+        self._open_store = open_store
+        self._network = network
+        self._clock = clock
+        self._last: float | None = None
+
+    def tick(self) -> bool:
+        """Start a sweep if one is due. True when it started one."""
+        store = self._open_store()
+        try:
+            every_min = store.setting(SCHEDULE_KEY, 0)
+            wanted = store.setting(SCHEDULE_NETWORK_KEY)
+        finally:
+            store.close()
+        if every_min not in SCHEDULES_MIN or not every_min or not wanted:
+            return False
+        now = self._clock()
+        if self._last is not None and now - self._last < every_min * 60:
+            return False
+        try:
+            targets = sweep_targets(self._network.read())
+        except NetworkInfoUnavailable:
+            return False
+        target = next((t for t in targets if str(t.network) == wanted and not t.needs_confirmation), None)
+        if target is None:
+            return False
+        if self._sweeper.start(target, scheduled=True):
+            self._last = now
+            return True
+        return False

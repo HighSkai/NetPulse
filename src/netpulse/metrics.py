@@ -28,7 +28,9 @@ from netpulse.domain import (
 # The availability window: the current UTC hour and the 23 before it.
 AVAILABILITY_HOURS = 24
 
-STATUS_FILTERS = ("all", DeviceState.UP, DeviceState.DEGRADED, DeviceState.DOWN, DeviceState.UNCHECKED)
+STATUS_FILTERS = (
+    "all", DeviceState.UP, DeviceState.DEGRADED, DeviceState.DOWN, DeviceState.UNCHECKED, DeviceState.PAUSED,
+)
 
 # Why a device that is up counts as degraded (plan section 18).
 SLOW = "slow"
@@ -42,8 +44,10 @@ class Sort:
     LATENCY = "latency"
     AVAILABILITY = "availability"
     CHECKED = "checked"
+    KIND = "kind"
+    GROUP = "group"
 
-    ALL = (NAME, HOST, STATUS, LATENCY, AVAILABILITY, CHECKED)
+    ALL = (NAME, HOST, STATUS, LATENCY, AVAILABILITY, CHECKED, KIND, GROUP)
 
 
 @dataclass(frozen=True)
@@ -55,15 +59,21 @@ class DeviceRow:
     availability: Availability
     recent: RecentChecks = RecentChecks(checks=0, failures=0, avg_ms=None)
     degraded_by: tuple[str, ...] = ()  # SLOW and/or FAILING; empty unless up
+    group: str = ""  # the name of the device's group (plan section 39)
 
     @property
     def state(self) -> str:
-        """The latest check's state, with up split into up and degraded."""
+        """The latest check's state, with up split into up and degraded. A paused
+        device is paused, whatever its last check said before it was."""
+        if self.status.device.paused:
+            return DeviceState.PAUSED
         return DeviceState.DEGRADED if self.degraded_by else self.status.state
 
     @property
     def latency_ms(self) -> int | None:
         """The latest RTT, only while the device is up (degraded devices are up)."""
+        if self.status.device.paused:
+            return None
         return self.status.latest.rtt_ms if self.status.state == DeviceState.UP else None
 
 
@@ -76,6 +86,7 @@ class FleetSummary:
     median_latency_ms: float | None  # None when no device is up; degraded ones count
     availability: Availability  # all live devices over the window
     degraded: int = 0
+    paused: int = 0  # not counted in monitored
 
 
 def availability_window_start(now: datetime, hours: int = AVAILABILITY_HOURS) -> str:
@@ -90,23 +101,26 @@ def device_rows(
     availability: Mapping[int, Availability],
     recent: Mapping[int, Sequence[CheckResult]] | None = None,
     thresholds: Thresholds = Thresholds(),
+    groups: Mapping[int, str] | None = None,
 ) -> list[DeviceRow]:
     """Pair each status with its availability and recent checks, and judge degraded.
 
-    No checks in the window is 0 of 0. Only a device that is up can be degraded.
+    No checks in the window is 0 of 0. Only a device that is up, and not
+    paused, can be degraded. groups names each device's group, by group id.
     """
     none = Availability(checks=0, successes=0)
     rows = []
     for status in statuses:
         checks = RecentChecks.of((recent or {}).get(status.device.id, ()))
         reasons: tuple[str, ...] = ()
-        if status.state == DeviceState.UP:
+        if status.state == DeviceState.UP and not status.device.paused:
             reasons = tuple(
                 reason
                 for reason, crossed in ((SLOW, checks.is_slow(thresholds)), (FAILING, checks.is_failing(thresholds)))
                 if crossed
             )
-        rows.append(DeviceRow(status, availability.get(status.device.id, none), checks, reasons))
+        group = (groups or {}).get(status.device.group_id, "") if status.device.group_id is not None else ""
+        rows.append(DeviceRow(status, availability.get(status.device.id, none), checks, reasons, group))
     return rows
 
 
@@ -114,7 +128,8 @@ def summarize(rows: Sequence[DeviceRow]) -> FleetSummary:
     states = [row.state for row in rows]
     latencies = [row.latency_ms for row in rows if row.latency_ms is not None]
     return FleetSummary(
-        monitored=len(rows),
+        monitored=len(rows) - states.count(DeviceState.PAUSED),
+        paused=states.count(DeviceState.PAUSED),
         up=states.count(DeviceState.UP),
         degraded=states.count(DeviceState.DEGRADED),
         down=states.count(DeviceState.DOWN),
@@ -127,8 +142,10 @@ def summarize(rows: Sequence[DeviceRow]) -> FleetSummary:
     )
 
 
-# Status sorts by urgency: down, degraded, not checked, then up.
-_STATE_ORDER = {DeviceState.DOWN: 0, DeviceState.DEGRADED: 1, DeviceState.UNCHECKED: 2, DeviceState.UP: 3}
+# Status sorts by urgency: down, degraded, not checked, then up, then paused.
+_STATE_ORDER = {
+    DeviceState.DOWN: 0, DeviceState.DEGRADED: 1, DeviceState.UNCHECKED: 2, DeviceState.UP: 3, DeviceState.PAUSED: 4,
+}
 
 _SORT_KEYS: dict[str, Callable[[DeviceRow], object]] = {
     Sort.NAME: lambda row: row.status.device.name.casefold(),
@@ -137,6 +154,8 @@ _SORT_KEYS: dict[str, Callable[[DeviceRow], object]] = {
     Sort.LATENCY: lambda row: row.latency_ms,
     Sort.AVAILABILITY: lambda row: row.availability.percent,
     Sort.CHECKED: lambda row: row.status.latest.checked_at if row.status.latest else None,
+    Sort.KIND: lambda row: row.status.device.kind_label.casefold() if row.status.device.kind != "unknown" else None,
+    Sort.GROUP: lambda row: row.group.casefold() or None,
 }
 
 
@@ -147,27 +166,43 @@ def select_rows(
     status: str = "all",
     sort: str = Sort.NAME,
     descending: bool = False,
+    kind: str = "",
+    group: int | None = None,
+    tag: str = "",
 ) -> list[DeviceRow]:
-    """Filter and sort the table (plan section 16).
+    """Filter and sort the table (plan sections 16 and 39).
 
-    q matches the name or host, ignoring case. Sorting is stable with ties by
-    name, and rows with no value for the sort key come last in either direction.
+    q matches the name, host, group, type, vendor, model, location, MAC address,
+    tags or notes, ignoring case; every word of it must be found somewhere.
+    kind, group (a group id; 0 means in no group) and tag narrow further.
+    Sorting is stable with ties by name, and rows with no value for the sort key
+    come last in either direction.
     """
-    needle = q.strip().casefold()
+    words = q.casefold().split()
     chosen = [
         row
         for row in rows
         if (status == "all" or row.state == status)
-        and (
-            needle in row.status.device.name.casefold()
-            or needle in row.status.device.host.casefold()
-        )
+        and (not kind or row.status.device.kind == kind)
+        and (group is None or (row.status.device.group_id or 0) == group)
+        and (not tag or tag in row.status.device.tags)
+        and all(word in _haystack(row) for word in words)
     ]
     by_name = sorted(chosen, key=lambda row: (row.status.device.name.casefold(), row.status.device.id))
     key = _SORT_KEYS[sort]
     present = [row for row in by_name if key(row) is not None]
     missing = [row for row in by_name if key(row) is None]
     return sorted(present, key=key, reverse=descending) + missing
+
+
+def _haystack(row: DeviceRow) -> str:
+    """Everything the search box looks through for one device, in lower case."""
+    device = row.status.device
+    mac = device.mac or ""
+    return "\n".join((
+        device.name, device.host, row.group, device.kind_label if device.kind != "unknown" else "", device.vendor,
+        device.model, device.location, mac, mac.replace("-", ":"), " ".join(device.tags), device.notes,
+    )).casefold()
 
 
 # Charts (plan section 17)
@@ -190,6 +225,9 @@ RANGES = {
         ChartRange("24h", "24 h", timedelta(hours=24), timedelta(minutes=15), from_rollups=False),
         ChartRange("7d", "7 d", timedelta(days=7), timedelta(hours=1), from_rollups=True),
         ChartRange("30d", "30 d", timedelta(days=30), timedelta(hours=6), from_rollups=True),
+        # Plan section 42: the long view, a day a point, from the hourly totals that are kept for good.
+        ChartRange("90d", "90 d", timedelta(days=90), timedelta(days=1), from_rollups=True),
+        ChartRange("1y", "1 y", timedelta(days=365), timedelta(days=1), from_rollups=True),
     )
 }
 DEFAULT_RANGE = "24h"
@@ -484,7 +522,7 @@ def _breakdown(keys: Iterable[str], labels: Sequence[tuple[str, str]]) -> list[t
 
 
 def by_state(rows: Iterable[DeviceRow]) -> list[tuple[str, str, int]]:
-    return _breakdown((row.state for row in rows), STATE_LABELS)
+    return _breakdown((row.state for row in rows if row.state != DeviceState.PAUSED), STATE_LABELS)
 
 
 def by_availability(rows: Iterable[DeviceRow]) -> list[tuple[str, str, int]]:
@@ -575,3 +613,56 @@ def protocol_totals(seconds: Iterable[SecondCounts]) -> list[tuple[str, int]]:
         for protocol, packets in second.protocols:
             totals[protocol] = totals.get(protocol, 0) + packets
     return sorted(totals.items(), key=lambda item: (-item[1], item[0]))
+
+
+# Reports (plan section 42)
+
+
+@dataclass(frozen=True)
+class ReportRow:
+    """One device over a report's window: how often it answered, and how its outages went."""
+
+    row: DeviceRow
+    availability: Availability
+    outages: int
+    downtime_s: int  # all outages in the window, cut to the window
+    longest_s: int
+
+    @property
+    def mean_outage_s(self) -> int | None:
+        """The average outage: how long it takes to come back."""
+        return self.downtime_s // self.outages if self.outages else None
+
+
+def report(
+    rows: Iterable[DeviceRow],
+    availability: Mapping[int, Availability],
+    events: Iterable[DeviceEvent],
+    since: datetime,
+    now: datetime,
+) -> list[ReportRow]:
+    """Each device's availability and outages from since to now, the least available first.
+
+    events are every device's outage events that could touch the window; an
+    outage that began before it, or is still going on, counts only for the part inside.
+    """
+    by_device: dict[int, list[DeviceEvent]] = {}
+    for event in events:
+        by_device.setdefault(event.device_id, []).append(event)
+    none = Availability(0, 0)
+    out = []
+    for row in rows:
+        lengths = []
+        for outage in outages(by_device.get(row.status.device.id, ())):
+            start = max(datetime.fromisoformat(outage.start), since)
+            end = datetime.fromisoformat(outage.end) if outage.end else now
+            if end > since and end > start:
+                lengths.append(int((end - start).total_seconds()))
+        out.append(ReportRow(
+            row, availability.get(row.status.device.id, none), len(lengths), sum(lengths), max(lengths, default=0)
+        ))
+    out.sort(key=lambda r: (
+        r.availability.percent if r.availability.percent is not None else 101.0, -r.downtime_s,
+        r.row.status.device.name.casefold(),
+    ))
+    return out

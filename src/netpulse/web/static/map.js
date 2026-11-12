@@ -10,8 +10,8 @@
   // this zoom on This PC instead of shrinking to fit. Fit shows all of it.
   var READABLE_ZOOM = 0.8;
   // The same glyphs as the dashboard's states (_macros.html); tests compare them.
-  var GLYPHS = { up: "●", degraded: "▲", down: "✕", unchecked: "○" };
-  var STATE_TOKENS = { up: "--up", degraded: "--warn", down: "--down", unchecked: "--unknown" };
+  var GLYPHS = { up: "●", degraded: "▲", down: "✕", unchecked: "○", paused: "‖" };
+  var STATE_TOKENS = { up: "--up", degraded: "--warn", down: "--down", unchecked: "--unknown", paused: "--unknown" };
   var cy = null;
   var selectedId = null;
   var fitted = false;
@@ -101,6 +101,8 @@
       { selector: 'node[kind = "gateway"]', style: { shape: "diamond", width: 26, height: 26 } },
       { selector: 'node[kind = "other"]', style: { shape: "round-octagon", width: 24, height: 24, "border-style": "dashed" } },
       { selector: "node[state]", style: { "background-color": stateColour, "border-color": stateColour } },
+      // Paused: hollow, like a node nobody monitors, but dashed.
+      { selector: 'node[state = "paused"]', style: { "background-color": token("--panel"), "border-style": "dashed" } },
       {
         selector: "edge",
         style: { width: 1.5, "line-color": token("--control"), "curve-style": "straight" },

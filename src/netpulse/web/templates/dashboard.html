@@ -1,30 +1,66 @@
 {% extends "base.html" %}
-{% from "_macros.html" import prompt, sort_header, view_flags %}
+{% from "_macros.html" import device_tabs, prompt, sort_header, view_flags %}
 {% set active_tab = "devices" %}
+
+{% block title %}Devices · NetPulse{% endblock %}
 
 {% block content %}
 <section>
   {{ prompt("Devices", "devices", flags=view_flags(view)) }}
+  {{ device_tabs("all", deleted) }}
 
   {# Plan section 16: search and filter are a GET form, so they work without
      JavaScript. With HTMX only #device-view is replaced, never this form, so
-     a slow reply cannot undo what is being typed. #}
+     a slow reply cannot undo what is being typed. Plan section 39 adds type,
+     group and tag. #}
   <form id="device-filter" class="filters" role="search" method="get" action="{{ url_for('netpulse.dashboard') }}"
         hx-get="{{ url_for('netpulse.dashboard') }}" hx-target="#device-view" hx-select="#device-view"
         hx-select-oob="#page-prompt" hx-swap="outerHTML" hx-push-url="true" hx-sync="this:replace"
-        hx-trigger="input changed delay:300ms from:#device-search, change from:#device-status, submit">
+        hx-trigger="input changed delay:300ms from:#device-search, change from:(#device-filter select), submit">
     <label>Search
       <input id="device-search" type="search" name="q" value="{{ view.q }}" maxlength="100"
-             placeholder="name or host" autocomplete="off" spellcheck="false">
+             placeholder="name, host, vendor, tag…" autocomplete="off" spellcheck="false">
     </label>
     <label>Status
       <select id="device-status" name="status">
-        {% for value, label in [("all", "All"), ("up", "Up"), ("degraded", "Degraded"), ("down", "Down"), ("unchecked", "Not checked")] %}
+        {% for value, label in [("all", "All"), ("up", "Up"), ("degraded", "Degraded"), ("down", "Down"), ("unchecked", "Not checked"), ("paused", "Paused")] %}
           <option value="{{ value }}"{% if view.status == value %} selected{% endif %}>{{ label }}</option>
         {% endfor %}
       </select>
     </label>
+    {%- if used_kinds %}
+    <label>Type
+      <select name="kind">
+        <option value="">All</option>
+        {%- for value in used_kinds %}
+        <option value="{{ value }}"{% if view.kind == value %} selected{% endif %}>{{ kinds[value] }}</option>
+        {%- endfor %}
+      </select>
+    </label>
+    {%- endif %}
+    {%- if groups %}
+    <label>Group
+      <select name="group">
+        <option value="">All</option>
+        {%- for group in groups %}
+        <option value="{{ group.id }}"{% if view.group == group.id|string %} selected{% endif %}>{{ group.name }} ({{ group.devices }})</option>
+        {%- endfor %}
+        <option value="0"{% if view.group == "0" %} selected{% endif %}>In no group</option>
+      </select>
+    </label>
+    {%- endif %}
+    {%- if tags %}
+    <label>Tag
+      <select name="tag">
+        <option value="">All</option>
+        {%- for tag, count in tags %}
+        <option value="{{ tag }}"{% if view.tag == tag %} selected{% endif %}>{{ tag }} ({{ count }})</option>
+        {%- endfor %}
+      </select>
+    </label>
+    {%- endif %}
     <button type="submit">Filter</button>
+    <a class="button filters-end" href="{{ url_for('netpulse.export_csv') }}">Export CSV</a>
   </form>
 
   <div id="device-view">
@@ -39,10 +75,12 @@
         <thead hx-boost="true" hx-target="#device-view" hx-select="#device-view" hx-select-oob="#page-prompt" hx-swap="outerHTML">
           <tr>
             {{ sort_header("Name", "name", view) }}
-            {{ sort_header("Host", "host", view) }}
+            {{ sort_header("Host", "host", view, "col-narrow") }}
+            {{ sort_header("Type", "kind", view, "col-wide") }}
+            {{ sort_header("Group", "group", view, "col-wide") }}
             {{ sort_header("Status", "status", view) }}
-            {{ sort_header("Latency", "latency", view, "num") }}
-            {{ sort_header("24 h", "availability", view, "num") }}
+            {{ sort_header("Latency", "latency", view, "num col-narrow") }}
+            {{ sort_header("24 h", "availability", view, "num col-narrow") }}
             {{ sort_header("Last checked", "checked", view, "col-optional") }}
             <th scope="col"><span class="visually-hidden">Actions</span></th>
           </tr>
@@ -53,8 +91,12 @@
   </div>
 </section>
 
-<section>
-  <h2>Add a device</h2>
+{% if can(Permission.DEVICES_MANAGE) %}
+<section aria-labelledby="add-heading">
+  <h2 id="add-heading">Add a device</h2>
   {% include "_add_form.html" %}
+  <p class="hint">Many at once: <a href="{{ url_for('netpulse.import_page') }}">import a CSV file</a>, or
+    <a href="{{ url_for('netpulse.discover') }}">sweep the network</a> and accept what it finds.</p>
 </section>
+{% endif %}
 {% endblock %}

@@ -10,7 +10,7 @@
       {{ row_status(node.row) }}
       {%- if node.row.latency_ms is not none and node.row.state == "up" %} <span class="detail">{{ node.row.latency_ms }} ms</span>{% endif %}
       {#- Plan section 30: trace the path to it. #}
-      <a class="trace-link" href="{{ url_for('netpulse.probe', target=node.row.status.device.host) }}">trace</a>
+      {% if can(Permission.DIAGNOSTICS_RUN) %}<a class="trace-link" href="{{ url_for('netpulse.probe', target=node.row.status.device.host) }}">trace</a>{% endif %}
     {%- else %}
       <strong>{{ node.label }}</strong>
       {%- if node.detail %} <span class="dim">{{ node.detail }}</span>{% endif %}

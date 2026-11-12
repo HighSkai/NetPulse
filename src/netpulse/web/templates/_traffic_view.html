@@ -19,10 +19,12 @@
       <dt>Keeps</dt><dd>{{ "headers only, 128 bytes a packet" if capture.snaplen == 128 else "whole packets" }}</dd>
     </dl>
     <div class="form-actions">
+      {%- if can(Permission.CAPTURE_RUN) %}
       <form method="post" action="{{ url_for('netpulse.stop_capture') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="primary">Stop</button>
       </form>
+      {%- endif %}
       <a class="button" href="{{ url_for('netpulse.capture_download', capture_id=capture.id) }}">Download so far</a>
     </div>
   </section>
@@ -64,7 +66,9 @@
   {%- endif %}
   <section class="panel" aria-labelledby="start-heading">
     <h2 id="start-heading">Start a capture</h2>
-    {%- if reason %}
+    {%- if not can(Permission.CAPTURE_RUN) %}
+    <p class="dim">Your account may look at captures, and not start one.</p>
+    {%- elif reason %}
     <p class="form-error" role="alert">{{ reason[:1]|upper }}{{ reason[1:] }}.</p>
     <p class="hint">Packet capture needs Npcap, installed once from npcap.com with its "Restrict Npcap driver's access to Administrators only" option off. The rest of NetPulse works without it.</p>
     {%- else %}

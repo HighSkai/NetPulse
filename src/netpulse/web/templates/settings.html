@@ -1,15 +1,13 @@
 {% extends "base.html" %}
-{% from "_macros.html" import error_summary, field_error, invalid, prompt %}
+{% from "_macros.html" import error_summary, field_error, invalid, prompt, settings_tabs %}
 {% set active_tab = "settings" %}
 
 {% block title %}Settings · NetPulse{% endblock %}
 
 {% block content %}
 {{ prompt("Settings", "settings") }}
-
-{% for message in get_flashed_messages() %}
-  <p class="saved" role="status">{{ message }}</p>
-{% endfor %}
+{{ settings_tabs("general") }}
+{%- set manage = can(Permission.SETTINGS_MANAGE) %}
 
 <section aria-labelledby="degraded-heading">
   <h2 id="degraded-heading">When a device counts as degraded</h2>
@@ -20,6 +18,7 @@
   <form class="device-form settings-form" method="post" action="{{ url_for('netpulse.save_settings') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     {{ error_summary(form) }}
+    <fieldset class="bare"{% if not manage %} disabled{% endif %}>
     <label>Slow: average above, in ms
       <input name="latency_ms" value="{{ form.latency_ms }}" id="field-latency_ms" inputmode="numeric" required
              type="number" min="1" max="{{ latency_max }}" step="1"{{ invalid(form, "latency_ms") }}>
@@ -32,17 +31,23 @@
       {{ field_error(form, "failures") }}
       <span class="hint">1 to {{ window }}. This many or more failed checks count.</span>
     </label>
+    {%- if manage %}
     <div class="form-actions">
       <button type="submit" class="primary">Save</button>
     </div>
+    {%- endif %}
+    </fieldset>
+    {%- if not manage %}<p class="hint">Only an administrator can change these.</p>{% endif %}
   </form>
 </section>
 
 <section aria-labelledby="fixed-heading">
-  <h2 id="fixed-heading">Fixed in this version</h2>
+  <h2 id="fixed-heading">How checks work</h2>
   <ul class="fixed">
-    <li>Every device is checked every {{ interval_s }} s.</li>
-    <li>An outage starts after {{ down_after }} failed checks in a row.</li>
+    <li>The check loop runs every {{ interval_s }} s and checks every device that is due, up to 32 at once.
+      Each device has its own interval, {{ interval_s }} s unless you change it on the device's edit page.</li>
+    <li>A device is checked by ping, or by connecting to a TCP port you choose, for devices that ignore ping.</li>
+    <li>An outage starts after {{ down_after }} failed checks in a row, and that is what alerts go by.</li>
     <li>Degraded looks at the last {{ window }} checks.</li>
   </ul>
 </section>
@@ -55,10 +60,32 @@
     <dd>{{ database_bytes|bytes }} · <code>{{ database }}</code><span class="hint"> with its write-ahead log</span></dd>
     <dt>Captures</dt>
     <dd>{{ capture_bytes|bytes }} in {{ capture_files }} {{ "file" if capture_files == 1 else "files" }} · <code>{{ folder }}</code></dd>
+    {%- if counts %}
+    <dt>Kept</dt>
+    <dd>{{ "{:,}".format(counts.check_results) }} single checks · {{ "{:,}".format(counts.check_rollups_hourly) }} hourly totals · {{ "{:,}".format(counts.device_events) }} outage events</dd>
+    {%- endif %}
   </dl>
+  {#- Plan section 42: single checks can be pruned; the hourly totals behind every longer chart never are. #}
+  {%- if manage %}
+  <form class="device-form settings-form" method="post" action="{{ url_for('netpulse.save_retention') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Keep single checks for
+      <select name="raw_days" id="field-raw_days">
+        {%- for days in raw_days_choices %}
+        <option value="{{ days }}"{% if days == raw_days %} selected{% endif %}>{{ "for ever" if days == 0 else days ~ " days" }}</option>
+        {%- endfor %}
+      </select>
+      <span class="hint">Hourly totals and outages are kept for good whatever you choose, so availability, the outage log
+        and every chart longer than 24 hours stay complete. At one check every {{ interval_s }} s a device adds about 317 KiB a day.</span>
+    </label>
+    <div class="form-actions"><button type="submit" class="primary">Save</button></div>
+  </form>
+  {%- else %}
+  <p class="hint">Single checks are kept {{ "for ever" if raw_days == 0 else "for " ~ raw_days ~ " days" }}; hourly totals and outages for good.</p>
+  {%- endif %}
   <p class="hint">
-    Every hour NetPulse deletes captures, traces and checks from outside past their limits, folds its
-    write-ahead log into the database, and lets SQLite refresh its statistics. Check history is kept.
+    Every hour NetPulse deletes what is past its limit (old checks, captures, traces, checks from outside, ended sessions),
+    folds its write-ahead log into the database, and lets SQLite refresh its statistics.
   </p>
 </section>
 
@@ -69,13 +96,22 @@
     <p class="man-head" aria-hidden="true"><span>NETPULSE(1)</span><span>NetPulse manual</span></p>
     <img class="man-wordmark" src="{{ url_for('static', filename='wordmark.svg') }}" alt="netpulse" width="375" height="120">
     <h3>NAME</h3>
-    <p>netpulse — a network monitor for this PC</p>
+    <p>netpulse — a network monitor for your own network</p>
     <h3>SYNOPSIS</h3>
-    <p>netpulse [--db PATH] [--port N] [--debug]</p>
+    <p>netpulse [--db PATH] [--port N] [--local-only] [--open] [--debug]<br>
+      netpulse [--db PATH] reset-password NAME<br>
+      netpulse [--db PATH] users</p>
     <h3>DESCRIPTION</h3>
     <p>
-      NetPulse pings every device every {{ interval_s }} s, keeps every result in a SQLite file,
-      and serves these pages to this PC only, on 127.0.0.1. There is no login, and nothing is sent anywhere else.
+      NetPulse checks every device on its interval, keeps the results in a SQLite file, and serves these pages to
+      whoever signs in: on this PC only, until an administrator turns on access from the network. Nothing is sent
+      anywhere else, except the notifications and checks from outside an administrator sets up.
+    </p>
+    <h3>ACCOUNTS</h3>
+    <p>
+      An administrator may do everything. A viewer may look at everything except packet captures and change nothing,
+      unless an administrator grants single permissions. A lost password is reset by an administrator, or with
+      <code>netpulse reset-password NAME</code> on the PC NetPulse runs on.
     </p>
     <h3>PAGES</h3>
     <dl>
@@ -94,11 +130,14 @@
       <dd>the last check got no answer; {{ down_after }} in a row start an outage</dd>
       <dt><span class="state state-unknown"><span class="glyph" aria-hidden="true">○</span> Not checked</span></dt>
       <dd>no check yet</dd>
+      <dt><span class="state state-paused"><span class="glyph" aria-hidden="true">‖</span> Paused</span></dt>
+      <dd>not checked, and never alerted on, until someone resumes it</dd>
     </dl>
     <h3>MOTION</h3>
     <p>
-      The background drifts, the status dot pulses while checks run, and a row flashes when it changes.
-      Motion in the status bar switches all three off in this browser. Nothing moves when Windows is set to reduce motion.
+      The background drifts, the status dot pulses while checks run, a row flashes when it changes, and menus,
+      dialogs and messages ease into place. Motion in the status bar switches all of it off in this browser.
+      Nothing moves when the device is set to reduce motion.
     </p>
   </div>
 </section>

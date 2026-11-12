@@ -1,0 +1,238 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf, error_summary, field_error, invalid, prompt, settings_tabs %}
+{% set active_tab = "settings" %}
+
+{% block title %}Access · NetPulse{% endblock %}
+
+{# Plan section 38: who can reach this NetPulse, and how. #}
+{% block content %}
+{{ prompt("Network access", "settings", flags="--access") }}
+{{ settings_tabs("access") }}
+{%- set local_url = "http://127.0.0.1:" ~ port %}
+
+{% if welcome %}
+<div class="notice" role="note">
+  <ol class="steps" aria-label="Setup steps">
+    <li class="done"><strong>1</strong> Administrator created</li>
+    <li aria-current="step"><strong>2</strong> Choose who can reach NetPulse</li>
+    <li><strong>3</strong> <a href="{{ url_for('netpulse.dashboard') }}">Add your devices</a></li>
+  </ol>
+  <p>You are signed in. Right now NetPulse answers only on this PC. To open it from a laptop, tablet or phone on your network,
+    turn that on below. You can also leave it as it is and <a href="{{ url_for('netpulse.discover') }}">find your devices</a>.</p>
+</div>
+{% endif %}
+
+{% if applying %}
+<div class="notice applying" role="status">
+  <p><strong>Saved.</strong> NetPulse is restarting its listener, which takes a second or two. Monitoring carries on.</p>
+  {%- if settings.lan and urls %}
+  <p>Then open NetPulse at <a href="{{ urls[0] }}{{ url_for('netpulse.access_page') }}">{{ urls[0] }}</a>, on this PC or any device on your network.
+    You will be asked to sign in again there: a session belongs to the address it was started at.</p>
+  {%- else %}
+  <p>Then carry on at <a href="{{ local_url }}{{ url_for('netpulse.access_page') }}">{{ local_url }}</a>, on this PC.</p>
+  {%- endif %}
+</div>
+{% endif %}
+
+<section aria-labelledby="now-heading">
+  <h2 id="now-heading">Right now</h2>
+  {%- if status.error %}
+  <div class="error-summary" role="alert">
+    <strong>Network access could not start:</strong> {{ status.error }}. NetPulse fell back to this PC only, so you can still fix it here.
+  </div>
+  {%- endif %}
+  {%- if status.forced_local %}
+  <p class="notice" role="note">NetPulse was started with <code>--local-only</code>, so the settings below are saved but not applied until it is started without it.</p>
+  {%- endif %}
+  {%- if blocked %}
+  {%- set adapter = blocked.values()|first %}
+  <div class="notice" role="alert">
+    <p><strong>Other devices cannot reach NetPulse yet.</strong> Windows marks the network on {{ adapter }} as <strong>Public</strong>,
+      and on a Public network Windows Firewall blocks devices from connecting, whatever rule allows the port on Private networks.</p>
+    <p>If this is your own home network, make it Private: <strong>Settings, Network &amp; internet, {{ adapter }}, Network profile type,
+      Private network</strong>. Or, in a PowerShell window opened as Administrator:</p>
+    <pre class="command"><code>Set-NetConnectionProfile -InterfaceAlias "{{ adapter }}" -NetworkCategory Private</code></pre>
+  </div>
+  {%- endif %}
+  <dl class="facts-list">
+    <dt>Reachable from</dt>
+    <dd>
+      {%- if not status.listening %}<span class="dim">not known: this NetPulse runs without its own server (debug mode), on this PC only</span>
+      {%- elif status.listening|length == 1 and status.listening[0][0] == "127.0.0.1" %}<span class="state state-up"><span class="glyph" aria-hidden="true">●</span> this PC only</span>
+      {%- else %}<span class="state state-degraded"><span class="glyph" aria-hidden="true">▲</span> other devices on the network</span>
+      {%- endif %}
+    </dd>
+    {%- if status.listening %}
+    <dt>Listening on</dt>
+    <dd>{% for host, p in status.listening %}<code>{{ status.scheme }}://{{ "every address of this PC" if host == "0.0.0.0" else host }}:{{ p }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+      {%- if status.note %}<span class="moved">{{ status.note }}</span>{% endif %}</dd>
+    {%- endif %}
+    <dt>On this PC</dt>
+    <dd><code>{{ ("https://localhost:" ~ port) if status.scheme == "https" else local_url }}</code></dd>
+    {%- if status.port_override %}
+    <dt>Port</dt>
+    <dd>{{ status.port_override }}, set with <code>--port</code> when NetPulse was started; the port below applies when it is started without it</dd>
+    {%- endif %}
+  </dl>
+</section>
+
+<section aria-labelledby="settings-heading">
+  <h2 id="settings-heading">Settings</h2>
+  <form class="device-form access-form" method="post" action="{{ url_for('netpulse.save_access') }}">
+    {{ csrf() }}
+    {{ error_summary(form) }}
+    <label class="check"><input type="checkbox" name="lan" value="yes" id="field-lan"{% if form.lan %} checked{% endif %}>
+      Let other devices on my network open NetPulse</label>
+    <p class="hint">Off: NetPulse answers only on this PC. On: anyone on the network you choose can reach the sign-in page,
+      and nothing else without an account.</p>
+
+    <fieldset class="group">
+      <legend>Where</legend>
+    <label>Listen on
+      <select name="bind" id="field-bind"{{ invalid(form, "bind") }}>
+        <option value="{{ all_interfaces }}"{% if form.bind == all_interfaces %} selected{% endif %}>Every address of this PC</option>
+        {%- for address, label in choices %}
+        <option value="{{ address }}"{% if form.bind == address %} selected{% endif %}>{{ label }}</option>
+        {%- endfor %}
+      </select>
+      {{ field_error(form, "bind") }}
+      <span class="hint">One address keeps NetPulse off this PC's other networks, such as a VPN or a second adapter.
+        Every address keeps working when the router hands this PC a new one.</span>
+    </label>
+    <label>Port
+      <input name="port" value="{{ form.port }}" id="field-port" type="number" min="1" max="65535" step="1" required{{ invalid(form, "port") }}>
+      {{ field_error(form, "port") }}
+    </label>
+    <label>Names
+      <input name="names" value="{{ form.names }}" id="field-names" maxlength="300" placeholder="netpulse.lan" autocomplete="off"
+             autocapitalize="off" spellcheck="false"{{ invalid(form, "names") }}>
+      {{ field_error(form, "names") }}
+      <span class="hint">Optional, separated by spaces. Only names your router or Pi-hole already points at this PC: adding one here
+        lets NetPulse answer to it, but cannot make it lead here. NetPulse answers to its addresses and to
+        <code>{{ computer|lower }}</code> already, and refuses any other name.</span>
+      {%- for check in names if check.state != name_state.HERE %}
+      <span class="field-error">{{ check.name }}
+        {%- if check.state == name_state.MISSING %} does not lead anywhere yet: this PC cannot look it up.
+        {%- elif check.state == name_state.ELSEWHERE %} leads to {{ check.addresses|join(", ") }}, not to this PC.
+        {%- else %}: the name lookup did not answer in time, so NetPulse cannot tell where it leads.{% endif %}</span>
+      {%- endfor %}
+    </label>
+    </fieldset>
+
+    <fieldset class="checks" id="field-tls">
+      <legend>Encryption</legend>
+      <label class="check"><input type="radio" name="tls" value="{{ tls.LOCAL }}"{% if form.tls == tls.LOCAL %} checked{% endif %}>
+        HTTPS with NetPulse's own certificate (recommended)</label>
+      <p class="hint">Encrypts everything between browser and NetPulse. Browsers warn until NetPulse's certificate authority is installed on the device; see below.</p>
+      <label class="check"><input type="radio" name="tls" value="{{ tls.CUSTOM }}"{% if form.tls == tls.CUSTOM %} checked{% endif %}>
+        HTTPS with a certificate of my own</label>
+      <div class="indent">
+        <label>Certificate file (PEM, with its chain)
+          <input name="cert_path" value="{{ form.cert_path }}" id="field-cert_path" maxlength="400" spellcheck="false" autocomplete="off"
+                 placeholder="C:\certs\netpulse.pem"{{ invalid(form, "cert_path") }}>
+          {{ field_error(form, "cert_path") }}
+        </label>
+        <label>Private key file (PEM, no passphrase)
+          <input name="key_path" value="{{ form.key_path }}" id="field-key_path" maxlength="400" spellcheck="false" autocomplete="off"
+                 placeholder="C:\certs\netpulse-key.pem">
+        </label>
+        <p class="hint">Paths on the PC NetPulse runs on. NetPulse reads the files and never copies or shows them.</p>
+      </div>
+      <label class="check"><input type="radio" name="tls" value="{{ tls.OFF }}"{% if form.tls == tls.OFF %} checked{% endif %}>
+        No encryption (HTTP)</label>
+      <p class="hint"><strong>Not recommended.</strong> Passwords and session cookies then cross your network in the clear,
+        where any device on it can read them.</p>
+    </fieldset>
+
+    <label class="check"><input type="checkbox" name="confirm_public" value="yes" id="field-confirm_public"{{ invalid(form, "confirm_public") }}>
+      This is a network I own or manage</label>
+    {{ field_error(form, "confirm_public") }}
+    <p class="hint">Only needed when an address is public or Windows marks its network as Public
+      {%- if public %} (here: {{ public|sort|join(", ") }}){% endif %}. Never turn this on at a café, a hotel or anywhere the network is not yours.</p>
+
+    <div class="form-actions"><button type="submit" class="primary">Save and apply</button></div>
+    <p class="hint">Applies at once, without restarting NetPulse. If a setting cannot be applied, NetPulse falls back to this PC only and says why here.
+      If you ever cannot reach it at all, start it with <code>netpulse --local-only</code>.</p>
+  </form>
+</section>
+
+{% if settings.lan %}
+<section aria-labelledby="open-heading">
+  <h2 id="open-heading">Open NetPulse from another device</h2>
+  <ol class="howto">
+    <li>
+      <strong>Type one of these addresses</strong> into a browser on a device on the same network:
+      <ul class="urls">
+        {%- for url in urls %}
+        <li><code>{{ url }}</code></li>
+        {%- else %}
+        <li class="dim">This PC has no private address to offer right now.</li>
+        {%- endfor %}
+      </ul>
+      {%- set waiting = names|rejectattr("state", "equalto", name_state.HERE)|list %}
+      {%- if waiting %}
+      <span class="hint">
+        {%- for check in waiting %}<code>{{ check.name }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+        {{ "is" if waiting|length == 1 else "are" }} left out: {{ "it does" if waiting|length == 1 else "they do" }} not lead to this PC yet.
+        To make a name work, add a DNS record for it on your router or Pi-hole pointing at {{ lan_address }}, or, on a computer,
+        add the line <code>{{ lan_address }} {{ waiting[0].name }}</code> to its hosts file
+        (<code>C:\Windows\System32\drivers\etc\hosts</code> on Windows). Phones and tablets can only use a name your router's DNS knows.
+      </span>
+      {%- endif %}
+    </li>
+    <li>
+      <strong>If the page does not load, Windows Firewall is blocking it.</strong> NetPulse does not change the firewall itself.
+      Allow the port once, in a PowerShell window opened as Administrator on this PC:
+      <pre class="command"><code>New-NetFirewallRule -DisplayName "NetPulse" -Direction Inbound -Protocol TCP -LocalPort {{ port }} -Action Allow -Profile Private</code></pre>
+      <span class="hint"><code>-Profile Private</code> keeps the port closed whenever this PC is on a network Windows marks as Public.
+        {%- if blocked %} <strong>Right now that is this network:</strong> make it Private first, as above.{% endif %}</span>
+    </li>
+    {%- if status.scheme == "https" and status.authority %}
+    <li>
+      <strong>Make the browser trust it.</strong> The first visit shows a certificate warning, and the browser is right to:
+      nothing has told it yet that this certificate is yours. Check that the fingerprint it shows matches the one below, then either
+      accept the warning on that device, or install NetPulse's certificate authority on it once:
+      <a class="button" href="{{ url_for('netpulse.authority_certificate') }}">Download the authority's certificate</a>
+      <ul class="fixed">
+        <li>Windows: open the file, Install Certificate, Current User, place it in Trusted Root Certification Authorities.</li>
+        <li>macOS: open it in Keychain Access, then set it to Always Trust.</li>
+        <li>iPhone and iPad: open it, install the profile in Settings, then enable it under General, About, Certificate Trust Settings.</li>
+        <li>Android: Settings, Security, Encryption and credentials, Install a certificate, CA certificate.</li>
+      </ul>
+      <span class="hint">After installing it, close every window of the browser and open it again (in Chrome or Edge, <code>chrome://restart</code>
+        or <code>edge://restart</code>). A browser keeps a site's earlier warning, and any "Proceed anyway", until it restarts.
+        The authority can only sign for private addresses and local names, so trusting it cannot be used to impersonate a public website.</span>
+    </li>
+    {%- endif %}
+    <li><strong>Sign in.</strong> Make each person their own account under <a href="{{ url_for('netpulse.users_page') }}">Users</a>; a viewer can look and change nothing.</li>
+  </ol>
+</section>
+{% endif %}
+
+{% if status.certificate %}
+<section aria-labelledby="cert-heading">
+  <h2 id="cert-heading">Certificate in use</h2>
+  <dl class="facts-list">
+    <dt>Issued by</dt>
+    <dd>{% if status.authority %}NetPulse's own authority on this PC: not trusted by a browser until it is installed there{% else %}your own certificate{% endif %}</dd>
+    <dt>Valid for</dt>
+    <dd>{{ status.certificate.names|join(", ") or "no names listed" }}</dd>
+    <dt>Expires</dt>
+    <dd>{{ status.certificate.not_after|localtime }} · {{ status.certificate.days_left(now) }} days left{% if status.authority %} · NetPulse renews it by itself{% endif %}</dd>
+    <dt>SHA-256 fingerprint</dt>
+    <dd><code class="fingerprint">{{ status.certificate.fingerprint }}</code></dd>
+    {%- if status.authority %}
+    <dt>Authority's fingerprint</dt>
+    <dd><code class="fingerprint">{{ status.authority.fingerprint }}</code></dd>
+    {%- endif %}
+  </dl>
+  {%- if status.authority %}
+  <form method="post" action="{{ url_for('netpulse.renew_certificate') }}">
+    {{ csrf() }}
+    <button type="submit">Make a new certificate now</button>
+    <span class="hint">For this PC's names and addresses as they are today. Devices that trust the authority trust the new one already.</span>
+  </form>
+  {%- endif %}
+</section>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf, device_tabs, prompt %}
+{% set active_tab = "devices" %}
+
+{% block title %}Import devices · NetPulse{% endblock %}
+
+{# Plan section 39: many devices at once, from a spreadsheet saved as CSV. #}
+{% block content %}
+{{ prompt("Import devices", "devices", flags="--import") }}
+{{ device_tabs("import") }}
+
+{% if added or skipped %}
+<section class="panel import-report" aria-labelledby="report-heading" role="status">
+  <h2 id="report-heading">{{ added|length }} added, {{ skipped|length }} skipped</h2>
+  {%- if added %}
+  <p><span class="state state-up"><span class="glyph" aria-hidden="true">●</span> Added:</span>
+    {% for device in added[:30] %}<a href="{{ url_for('netpulse.device_detail', device_id=device.id) }}">{{ device.name }}</a>{% if not loop.last %}, {% endif %}{% endfor %}
+    {%- if added|length > 30 %} and {{ added|length - 30 }} more{% endif %}. Their first checks run within 30 s.</p>
+  {%- endif %}
+  {%- if skipped %}
+  <p><span class="state state-degraded"><span class="glyph" aria-hidden="true">▲</span> Not added.</span> Fix these lines in the file and import it again; what is already monitored is skipped, never added twice.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th scope="col" class="num">Line</th><th scope="col">Name</th><th scope="col">Host</th><th scope="col">Why not</th></tr></thead>
+      <tbody>
+        {%- for row, why in skipped %}
+        <tr><td class="num">{{ row.line }}</td><td>{{ row.name or "—" }}</td><td>{{ row.host or "—" }}</td><td>{{ why[:1]|upper }}{{ why[1:] }}</td></tr>
+        {%- endfor %}
+      </tbody>
+    </table>
+  </div>
+  {%- endif %}
+</section>
+{% endif %}
+
+<section aria-labelledby="import-heading">
+  <h2 id="import-heading">From a CSV file</h2>
+  <form class="device-form stack" method="post" action="{{ url_for('netpulse.import_devices') }}" enctype="multipart/form-data">
+    {{ csrf() }}
+    {%- if error %}
+    <div class="error-summary" role="alert"><strong>There is a problem.</strong> {{ error }}</div>
+    {%- endif %}
+    <label>File
+      <input type="file" name="file" accept=".csv,text/csv,text/plain">
+    </label>
+    <label>Or paste it here
+      <textarea name="text" rows="8" spellcheck="false" placeholder="name,host,type,group&#10;Router,192.168.1.1,router,Core&#10;NAS,nas.lan,nas,Rack">{{ text }}</textarea>
+    </label>
+    <div class="form-actions"><button type="submit" class="primary">Import</button></div>
+  </form>
+  <p class="hint">
+    The first line names the columns. <code>name</code> and <code>host</code> are needed; the others are optional:
+    {% for column in columns[2:] %}<code>{{ column }}</code>{% if not loop.last %}, {% endif %}{% endfor %}.
+    <code>check</code> is <code>icmp</code> or <code>tcp</code>, and a TCP check needs a <code>port</code>. Tags are separated by commas or semicolons.
+    A group that does not exist yet is made. Up to {{ "{:,}".format(max_rows) }} devices and 1 MB at a time.
+  </p>
+  <p><a class="button" href="{{ url_for('netpulse.export_csv') }}">Download the current devices as CSV</a>
+    <span class="hint">The export has exactly these columns, so it doubles as a template and a backup of the list.</span></p>
+</section>
+{% endblock %}

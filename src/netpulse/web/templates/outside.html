@@ -25,13 +25,15 @@
     <li>NetPulse sends it only what you type here: the host, the kind of check, the port or path, and where the probes should be. Nothing about this PC or your network is sent.</li>
     <li><strong>Globalping's results are public:</strong> anyone with a check's id can see it, for up to about six months.</li>
     <li>Only public hosts can be checked. Addresses and names on your own network are refused before anything is sent.</li>
-    <li>Without an account it allows 250 probe tests an hour from this PC. Each probe in a check is one test.</li>
+    <li>Without an account it allows 250 probe tests an hour from this network. Each probe in a check is one test.</li>
   </ul>
   {%- if form.error and not consented %}
   {{ error_summary(form) }}
   {%- endif %}
   {%- if not available %}
   <p class="form-error" role="alert">Checks from outside are off in this NetPulse.</p>
+  {%- elif not can(Permission.SETTINGS_MANAGE) %}
+  <p class="dim">{{ "An administrator agreed to this." if consented else "Only an administrator can agree to this." }}</p>
   {%- else %}
   <form method="post" action="{{ url_for('netpulse.outside_consent') }}" class="form-actions">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -46,7 +48,7 @@
   {%- endif %}
 </section>
 
-{%- if consented %}
+{%- if consented and can(Permission.OUTSIDE_RUN) %}
 <section class="panel" aria-labelledby="outside-heading">
   <h2 id="outside-heading">Check from outside</h2>
   <form class="device-form outside-form" method="post" action="{{ url_for('netpulse.start_outside_check') }}">

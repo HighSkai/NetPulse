@@ -13,9 +13,10 @@
   {% for row in rows %}
     {% include "_device_row.html" %}
   {% else %}
-    <tr class="empty"><td colspan="7">
+    <tr class="empty"><td colspan="9">
       {%- if total %}No devices match. <a href="{{ url_for('netpulse.dashboard') }}">Show all {{ total }}</a>
-      {%- else %}No devices yet. Add one below.{% endif -%}
+      {%- elif can(Permission.DEVICES_MANAGE) %}No devices yet. Add one below.
+      {%- else %}No devices yet. An administrator adds them.{% endif -%}
     </td></tr>
   {% endfor %}
 </tbody>

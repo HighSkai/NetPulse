@@ -18,14 +18,15 @@ test/
 .coverage.*
 htmlcov/
 coverage.xml
-.github/workflows/tests.yml
 
-# --- Runtime data: databases, upgrade backups and packet captures ---
+# --- Runtime data: databases, upgrade backups, certificates and packet captures ---
 # NetPulse's database and its upgrade copies (netpulse.vN-backup-*.db) hold your
-# devices and their history. Captures hold whatever the packets carried.
+# devices, history and accounts. The -tls folder holds your certificate
+# authority's private key. Captures hold whatever the packets carried.
 *.db
 *.db-wal
 *.db-shm
+*-tls/
 *-captures/
 *.pcap
 *.pcapng
@@ -42,9 +43,10 @@ coverage.xml
 *.pem
 *.key
 
-# --- Development notes and planning documents ---
-docs/decisions/
-docs/handoff.md
+# --- Kept locally: documentation, screenshots, planning notes and CI ---
+# The repository holds only what NetPulse needs to run.
+docs/
+.github/
 
 # --- Editors, AI tooling and operating systems ---
 .idea/

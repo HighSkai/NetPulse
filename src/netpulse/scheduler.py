@@ -10,6 +10,9 @@
 - Every MAINTENANCE_INTERVAL_S, between rounds, it runs the maintenance
   pass (plan section 32): retention, a WAL checkpoint and SQLite's
   optimize. A failed pass is logged and tried again an interval later.
+- Since plan section 40 a round checks the devices that are due, many at
+  once, and since plan section 41 the alert engine looks at each round's
+  results on this thread, after they are stored.
 - Tests drive it with a fake clock and wait function; nothing sleeps.
 """
 
@@ -23,7 +26,7 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
-from netpulse.checks import CHECK_INTERVAL_S, run_round
+from netpulse.checks import CHECK_INTERVAL_S, TcpProbe, run_round
 from netpulse.ping.result import Pinger, PingerUnavailable, PingResult
 from netpulse.store import Store, Upkeep
 
@@ -165,8 +168,18 @@ class Scheduler:
         heartbeat: Heartbeat | None = None,
         cleanup_captures: Callable[[], object] | None = None,
         maintenance_s: float = MAINTENANCE_INTERVAL_S,
+        tcp: TcpProbe | None = None,
+        after_round: Callable[[Store], object] | None = None,
+        on_round_failed: Callable[[str], object] | None = None,
+        on_tick: Callable[[], object] | None = None,
     ) -> None:
         """open_store gives a fresh Store per round: SQLite connections stay on one thread.
+
+        tcp checks the devices set to a TCP port (plan section 40). after_round
+        gets the round's Store once its results are in, and on_round_failed the
+        reason a round could not run: the alert engine's two hooks (plan
+        section 41). on_tick runs once a loop, between rounds: scheduled sweeps.
+        None of the three may stop the loop; each guards itself.
 
         wait(seconds) blocks and returns True when the loop should stop.
         By default it waits on stop(). heartbeat is shared with the web app;
@@ -185,6 +198,11 @@ class Scheduler:
         self._thread: threading.Thread | None = None
         self._cleanup_captures = cleanup_captures
         self.maintenance_s = maintenance_s
+        self._tcp = tcp
+        self._tick = 0  # rounds run so far: which devices on a longer interval are due
+        self._after_round = after_round
+        self._on_round_failed = on_round_failed
+        self._on_tick = on_tick
 
     @property
     def running(self) -> bool:
@@ -217,13 +235,22 @@ class Scheduler:
             try:
                 store = self._open_store()
                 try:
-                    results = run_round(store, self._pinger)
+                    results = run_round(store, self._pinger, tcp=self._tcp, tick=self._tick)
+                    self._tick += 1
+                    statuses = store.live_device_statuses()
+                    if self._after_round is not None:
+                        self._after_round(store)
                 finally:
                     store.close()
             except Exception as exc:
                 self.heartbeat.round_failed(failure_message(exc))
+                if self._on_round_failed is not None:
+                    self._on_round_failed(failure_message(exc))
                 raise
-            self.heartbeat.round_finished(len(results), sum(result.success for _, result in results))
+            # The status bar counts every monitored device, not only those this round
+            # checked: a device on a five-minute interval is still up between its checks.
+            watched = [s for s in statuses if not s.device.paused]
+            self.heartbeat.round_finished(len(watched), sum(1 for s in watched if s.latest is not None and s.latest.success))
             return results
         finally:
             self._round_lock.release()
@@ -240,8 +267,9 @@ class Scheduler:
             log.exception("maintenance failed; trying again in %d s", self.maintenance_s)
             return None
         log.info(
-            "maintenance: deleted %d trace(s) and %d check(s) from outside; WAL %s",
-            upkeep.traces, upkeep.outside_checks, "checkpointed" if upkeep.checkpointed else "busy, partly kept",
+            "maintenance: deleted %d trace(s), %d check(s) from outside and %d old device check(s); WAL %s",
+            upkeep.traces, upkeep.outside_checks, upkeep.checks,
+            "checkpointed" if upkeep.checkpointed else "busy, partly kept",
         )
         return upkeep
 
@@ -266,6 +294,11 @@ class Scheduler:
                 if self._clock() >= next_maintenance:
                     self.run_maintenance()
                     next_maintenance = self._clock() + self.maintenance_s
+                if self._on_tick is not None:
+                    try:
+                        self._on_tick()
+                    except Exception:
+                        log.exception("a scheduled task failed; the check loop carries on")
 
                 now = self._clock()
                 next_start, skipped = next_round_start(started, now, self.interval_s)

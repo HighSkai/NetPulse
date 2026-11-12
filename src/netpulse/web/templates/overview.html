@@ -15,6 +15,13 @@
   <div class="overview-grid">
     <section class="panel problems" aria-labelledby="problems-heading">
       <h2 id="problems-heading">Problems ({{ problems|length }})</h2>
+      {#- Plan section 41: what the down devices may have in common. A hypothesis, said as one. #}
+      {%- for finding in findings %}
+      <div class="finding finding-{{ finding.confidence }}" role="note">
+        <strong>{{ "Likely cause" if finding.confidence == "likely" else "Possible cause" }}:</strong> {{ finding.summary }}.
+        <span class="evidence">Evidence: {{ finding.evidence }}.</span>
+      </div>
+      {%- endfor %}
       {%- if problems %}
       <ol class="problem-list">
         {%- for problem in problems %}
@@ -38,7 +45,7 @@
       {%- elif summary.monitored %}
       <p class="all-clear"><span class="state state-up"><span class="glyph" aria-hidden="true">●</span> No problems.</span> Every checked device is up.</p>
       {%- else %}
-      <p class="hint">No devices yet. <a href="{{ url_for('netpulse.dashboard') }}">Add one</a>, or <a href="{{ url_for('netpulse.discover') }}">discover</a> what is on this PC's network.</p>
+      <p class="hint">No devices yet. {% if can(Permission.DEVICES_MANAGE) %}<a href="{{ url_for('netpulse.dashboard') }}#add-heading">Add one</a>, <a href="{{ url_for('netpulse.import_page') }}">import a list</a>, or <a href="{{ url_for('netpulse.discover') }}">discover</a> what is on this network.{% else %}An administrator adds them.{% endif %}</p>
       {%- endif %}
     </section>
 

@@ -89,9 +89,17 @@
   document.addEventListener("DOMContentLoaded", drawAll);
   document.addEventListener("htmx:afterSettle", drawAll);
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", redrawAll);
-  window.addEventListener("resize", function () {
+  // The chart follows its box, whatever changed the box's width: the window,
+  // a panel beside it, a phone turned on its side.
+  function fit() {
     drawn.forEach(function (item) {
-      item.chart.setSize({ width: item.box.clientWidth, height: HEIGHT });
+      var width = item.box.clientWidth;
+      if (width > 0 && width !== item.chart.width) item.chart.setSize({ width: width, height: HEIGHT });
     });
-  });
+  }
+
+  window.addEventListener("resize", fit);
+  if (typeof ResizeObserver === "function") {
+    new ResizeObserver(fit).observe(document.querySelector("main"));
+  }
 })();

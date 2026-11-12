@@ -2,30 +2,57 @@
 {% set device = row.status.device %}
 {% set latest = row.status.latest %}
 {# flash: the row Check now just refreshed, highlighted briefly when motion is allowed (plan section 25).
-   Plan section 32: its links carry the table's view, so Back on the device page returns to it. #}
+   Plan section 32: its links carry the table's view, so Back on the device page returns to it.
+   Plan section 43: a row's actions are one menu, so the table fits a laptop or a phone;
+   each action is there only for an account that may use it (plan section 35). #}
 {% set back = view.params if view is defined else {} %}
 <tr id="device-{{ device.id }}"{% if flash %} class="flash"{% endif %}>
-  <td><a class="name-cut" href="{{ url_for('netpulse.device_detail', device_id=device.id, **back) }}" title="{{ device.name }}">{{ device.name }}</a></td>
-  <td>{{ device.host }}</td>
+  <td><a class="name-cut" href="{{ url_for('netpulse.device_detail', device_id=device.id, **back) }}" title="{{ device.name }}">{{ device.name }}</a>
+    {%- for tag in device.tags[:3] %} <span class="tag">{{ tag }}</span>{% endfor %}</td>
+  <td class="col-narrow">{{ device.host }}{% if device.check_kind == "tcp" %}<span class="detail">:{{ device.check_port }}</span>{% endif %}</td>
+  <td class="col-wide">{{ device.kind_label if device.kind != "unknown" else "—" }}</td>
+  <td class="col-wide">{{ row.group or "—" }}</td>
   <td>{{ row_status(row) }}</td>
-  <td class="num">{{ row.latency_ms|ms }}</td>
-  <td class="num">{{ row.availability|percent }}</td>
-  <td class="col-optional">{{ latest.checked_at|localtime if latest else "Never" }}</td>
+  <td class="num col-narrow">{{ row.latency_ms|ms }}</td>
+  <td class="num col-narrow">{{ row.availability|percent }}</td>
+  <td class="col-optional">{% if latest %}<time datetime="{{ latest.checked_at }}" title="{{ latest.checked_at|localtime }}">{{ latest.checked_at|shorttime }}</time>{% else %}Never{% endif %}</td>
   <td class="actions">
-    <form method="post" action="{{ url_for('netpulse.check_device', device_id=device.id) }}"
-          hx-post="{{ url_for('netpulse.check_device', device_id=device.id) }}"
-          hx-target="closest tr" hx-swap="outerHTML" hx-include="#device-filter" hx-disabled-elt="find button">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button type="submit">Check now</button>
-    </form>
-    <a class="button" href="{{ url_for('netpulse.edit_device', device_id=device.id, **back) }}">Edit</a>
-    {# hx-include sends the table's view, so the refreshed rows keep it (plan section 16). #}
-    <form method="post" action="{{ url_for('netpulse.delete_device', device_id=device.id) }}"
-          hx-post="{{ url_for('netpulse.delete_device', device_id=device.id) }}"
-          hx-target="#device-rows" hx-swap="outerHTML" hx-include="#device-filter"
-          hx-confirm="Delete {{ device.name }}? Its check history is kept.">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button type="submit" class="danger">Delete</button>
-    </form>
+    {%- set check = can(Permission.CHECKS_RUN) and not device.paused %}
+    {%- set manage = can(Permission.DEVICES_MANAGE) %}
+    {%- if check or manage %}
+    <button type="button" class="menu-button" popovertarget="device-menu-{{ device.id }}" aria-label="Actions for {{ device.name }}">⋯</button>
+    <div id="device-menu-{{ device.id }}" class="menu" popover>
+      <p class="menu-head">{{ device.name }}</p>
+      {%- if check %}
+      <form method="post" action="{{ url_for('netpulse.check_device', device_id=device.id) }}"
+            hx-post="{{ url_for('netpulse.check_device', device_id=device.id) }}"
+            hx-target="closest tr" hx-swap="outerHTML" hx-include="#device-filter" hx-disabled-elt="find button">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit">Check now</button>
+      </form>
+      {%- endif %}
+      {%- if can(Permission.DIAGNOSTICS_RUN) %}
+      <a href="{{ url_for('netpulse.probe', target=device.host) }}">Trace the path</a>
+      {%- endif %}
+      {%- if manage %}
+      <a href="{{ url_for('netpulse.edit_device', device_id=device.id, **back) }}">Edit</a>
+      <form method="post" action="{{ url_for('netpulse.pause_device', device_id=device.id) }}"
+            hx-post="{{ url_for('netpulse.pause_device', device_id=device.id) }}"
+            hx-target="closest tr" hx-swap="outerHTML" hx-include="#device-filter">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="paused" value="{{ 'no' if device.paused else 'yes' }}">
+        <button type="submit">{{ "Resume checks" if device.paused else "Pause checks" }}</button>
+      </form>
+      {# hx-include sends the table's view, so the refreshed rows keep it (plan section 16). #}
+      <form method="post" action="{{ url_for('netpulse.delete_device', device_id=device.id) }}"
+            hx-post="{{ url_for('netpulse.delete_device', device_id=device.id) }}"
+            hx-target="#device-rows" hx-swap="outerHTML" hx-include="#device-filter"
+            hx-confirm="Delete {{ device.name }}? Its checks stop. Its history is kept, and it can be restored.">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="danger">Delete</button>
+      </form>
+      {%- endif %}
+    </div>
+    {%- endif %}
   </td>
 </tr>

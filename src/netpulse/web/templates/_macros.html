@@ -14,7 +14,9 @@
 {# A device row's state: the latest check's, with up split into up and degraded
    (plan section 18). A degraded device says why, briefly. #}
 {% macro row_status(row) -%}
-  {% if row.state == "degraded" -%}
+  {% if row.state == "paused" -%}
+    <span class="state state-paused"><span class="glyph" aria-hidden="true">‖</span> Paused</span>
+  {%- elif row.state == "degraded" -%}
     <span class="state state-degraded"><span class="glyph" aria-hidden="true">▲</span> Degraded</span>
     {{- " " }}<span class="detail">{{ degraded_reasons(row) }}</span>
   {%- else -%}
@@ -39,6 +41,42 @@
       {%- if sorted %} <span aria-hidden="true">{{ "▲" if view.direction == "asc" else "▼" }}</span>{% endif -%}
     </a>
   </th>
+{%- endmacro %}
+
+{% macro csrf() -%}
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+{%- endmacro %}
+
+{# The pages under settings (plan section 43), each shown only to an account that may open it. #}
+{% macro settings_tabs(active) -%}
+<nav class="subtabs" aria-label="Settings">
+  <a href="{{ url_for('netpulse.settings') }}"{% if active == "general" %} aria-current="page"{% endif %}>General</a>
+  {%- if can(Permission.SETTINGS_MANAGE) %}
+  <a href="{{ url_for('netpulse.access_page') }}"{% if active == "access" %} aria-current="page"{% endif %}>Access</a>
+  {%- endif %}
+  {%- if can(Permission.USERS_MANAGE) %}
+  <a href="{{ url_for('netpulse.users_page') }}"{% if active == "users" %} aria-current="page"{% endif %}>Users</a>
+  {%- endif %}
+  {%- if can(Permission.ALERTS_MANAGE) %}
+  <a href="{{ url_for('netpulse.alert_settings') }}"{% if active == "alerts" %} aria-current="page"{% endif %}>Alerts</a>
+  {%- endif %}
+  {%- if can(Permission.USERS_MANAGE) %}
+  <a href="{{ url_for('netpulse.audit_page') }}"{% if active == "audit" %} aria-current="page"{% endif %}>Audit</a>
+  {%- endif %}
+  <a href="{{ url_for('netpulse.account') }}"{% if active == "account" %} aria-current="page"{% endif %}>Account</a>
+</nav>
+{%- endmacro %}
+
+{# The pages under devices (plan section 39). #}
+{% macro device_tabs(active, deleted=none) -%}
+<nav class="subtabs" aria-label="Devices">
+  <a href="{{ url_for('netpulse.dashboard') }}"{% if active == "all" %} aria-current="page"{% endif %}>All devices</a>
+  <a href="{{ url_for('netpulse.groups_page') }}"{% if active == "groups" %} aria-current="page"{% endif %}>Groups</a>
+  {%- if can(Permission.DEVICES_MANAGE) %}
+  <a href="{{ url_for('netpulse.import_page') }}"{% if active == "import" %} aria-current="page"{% endif %}>Import</a>
+  {%- endif %}
+  <a href="{{ url_for('netpulse.deleted_devices') }}"{% if active == "deleted" %} aria-current="page"{% endif %}>Deleted{% if deleted %} ({{ deleted }}){% endif %}</a>
+</nav>
 {%- endmacro %}
 
 {% macro device_fields(form) -%}

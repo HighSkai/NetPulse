@@ -15,6 +15,7 @@ from pathlib import Path
 
 from flask import Response, abort, flash, redirect, render_template, request, url_for
 
+from netpulse.accounts import Permission
 from netpulse.capture import SNAPLEN_FULL, SNAPLEN_HEADERS, CaptureUnavailable, Interface, InvalidFilter
 from netpulse.capture.pcap import MEDIA_TYPE
 from netpulse.charts import PATTERNS, Slice, bar_list, donut
@@ -32,8 +33,9 @@ from netpulse.traffic import (
     filter_presets,
     size_text,
 )
-from netpulse.web.app import format_bytes, get_network, get_store, get_traffic
+from netpulse.web.app import audit, format_bytes, get_network, get_store, get_traffic
 from netpulse.web.forms import Refusable
+from netpulse.web.security import access
 from netpulse.web.views import bp
 
 PACKET_ROWS = 500  # rows in the live packet list
@@ -116,12 +118,14 @@ def _web_port() -> int:
 
 
 @bp.get("/traffic")
+@access(Permission.CAPTURE_VIEW)
 def traffic():
     """Choose an interface and a filter, and start a capture; watch it; list finished ones."""
     return _traffic_page(CaptureForm())
 
 
 @bp.get("/traffic/view")
+@access(Permission.CAPTURE_VIEW)
 def traffic_view():
     """The live part of the traffic page. Polls itself every second while a capture runs.
 
@@ -136,13 +140,15 @@ def traffic_view():
 
 
 @bp.post("/traffic/start")
+@access(Permission.CAPTURE_RUN)
 def start_capture():
     form = CaptureForm.from_request()
     service = _traffic()
     try:
         if service is None:
             raise CaptureUnavailable("packet capture is off in this NetPulse")
-        service.start(form.interface, form.filter, form.snaplen)
+        started = service.start(form.interface, form.filter, form.snaplen)
+        audit("started capture", started.description or started.interface, form.filter)
     except CaptureBusy as exc:
         return _traffic_page(form.fail(exc)), 409
     except (ValidationError, InvalidFilter) as exc:
@@ -154,15 +160,18 @@ def start_capture():
 
 
 @bp.post("/traffic/stop")
+@access(Permission.CAPTURE_RUN)
 def stop_capture():
     service = _traffic()
     if service is not None:
         service.stop()
         service.join(5)  # one read at most, so the page shows it finished
+        audit("stopped capture")
     return redirect(url_for(".traffic"))
 
 
 @bp.get("/traffic/<int:capture_id>")
+@access(Permission.CAPTURE_VIEW)
 def capture_detail(capture_id: int):
     """A capture's facts, its graphs from the stored seconds, and its packets, paged from its file."""
     return _capture_page(_capture_or_404(capture_id))
@@ -191,6 +200,7 @@ def _capture_page(capture: Capture, error: str | None = None) -> str:
 
 
 @bp.get("/traffic/<int:capture_id>/pcap")
+@access(Permission.CAPTURE_VIEW)
 def capture_download(capture_id: int):
     """The capture's PCAP file, as an attachment. A running capture is sent as it stands, to its last whole packet."""
     capture = _capture_or_404(capture_id)
@@ -199,6 +209,7 @@ def capture_download(capture_id: int):
     if path is None or not path.is_file():
         abort(404)
     length = service.download_length(capture)
+    audit("downloaded capture", capture.file)
     return Response(
         _read(path, length),
         mimetype=MEDIA_TYPE,
@@ -211,6 +222,7 @@ def capture_download(capture_id: int):
 
 
 @bp.post("/traffic/<int:capture_id>/delete")
+@access(Permission.CAPTURE_RUN)
 def delete_capture(capture_id: int):
     """Delete a finished capture, its counts and its file, once the box is ticked."""
     capture = _capture_or_404(capture_id)
@@ -223,6 +235,7 @@ def delete_capture(capture_id: int):
         get_store().delete_capture(capture_id)
     else:
         service.delete(capture_id)
+    audit("deleted capture", capture.file)
     flash(f"Deleted the capture from {_local(capture.started_at)} and its file.")
     return redirect(url_for(".traffic"))
 

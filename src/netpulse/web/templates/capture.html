@@ -64,7 +64,7 @@
   </nav>
 </section>
 
-{% if not capture.running %}
+{% if not capture.running and can(Permission.CAPTURE_RUN) %}
 <section aria-labelledby="delete-heading">
   <h2 id="delete-heading">Delete</h2>
   <form class="device-form" method="post" action="{{ url_for('netpulse.delete_capture', capture_id=capture.id) }}">

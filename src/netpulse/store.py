@@ -14,6 +14,11 @@ devices, schema v5 (plan section 21) the review list of discovered hosts, and
 schema v6 (plan section 28) packet captures and their per-second counts, and
 schema v7 (plan section 30) path traces and their hops, and schema v8 (plan
 section 31) the consent to checks from outside and the checks themselves.
+Schema versions 9 to 11 (plan sections 35 to 42) add accounts, inventory and
+alerts; their steps are in netpulse.store_schema, and the methods that use
+them in netpulse.store_accounts and netpulse.store_alerts. Since v10 a deleted
+device can be restored or erased, and old checks pruned: stored checks and
+events are still never edited.
 Files are upgraded by fixed, versioned migration steps, after a backup.
 """
 
@@ -44,16 +49,19 @@ from netpulse.domain import (
     CheckResult,
     Device,
     DeviceEvent,
+    DeviceGroup,
     DeviceStatus,
     Hop,
     HopLabel,
     HourlyRollup,
+    Inventory,
     SecondCounts,
     Thresholds,
     Trace,
     ValidationError,
     connects_through,
     outage_event,
+    validate_group_name,
     validate_name,
     validate_parent,
     validate_thresholds,
@@ -62,8 +70,16 @@ from netpulse.network import DiscoveredHost, FoundHost, HostState
 from netpulse.ping.hosts import validate_host
 from netpulse.ping.result import PingResult
 from netpulse.probes.globalping import KINDS, MAX_PROBES, CheckRequest, OutsideCheck, ProbeResult, Where
+from netpulse.store_accounts import AccountsMixin
+from netpulse.store_alerts import AlertsMixin
+from netpulse.store_schema import MIGRATIONS as _LATER_MIGRATIONS
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 11
+# Plan section 42: how long single checks are kept in a new database, in days.
+# Hourly totals are kept for good, and every chart past 24 hours reads those.
+DEFAULT_RAW_DAYS = 90
+RAW_DAYS_CHOICES = (0, 30, 90, 180, 365)  # 0 keeps every check
+RETENTION_KEY = "retention.raw_days"
 # How long a write waits for another connection's write to finish.
 BUSY_TIMEOUT_S = 5.0
 # Plan section 28: a capture writes once a second while pages read, so the WAL
@@ -452,7 +468,9 @@ def _to_v8(conn: sqlite3.Connection) -> None:
 
 
 # Step that brings a file up to each version, applied in order.
-_MIGRATIONS = {1: _to_v1, 2: _to_v2, 3: _to_v3, 4: _to_v4, 5: _to_v5, 6: _to_v6, 7: _to_v7, 8: _to_v8}
+_MIGRATIONS = {
+    1: _to_v1, 2: _to_v2, 3: _to_v3, 4: _to_v4, 5: _to_v5, 6: _to_v6, 7: _to_v7, 8: _to_v8, **_LATER_MIGRATIONS,
+}
 
 
 @dataclass(frozen=True)
@@ -462,6 +480,7 @@ class Upkeep:
     traces: int  # deleted past KEEP_TRACES
     outside_checks: int  # deleted past KEEP_OUTSIDE_CHECKS
     checkpointed: bool  # the whole write-ahead log went into the database file
+    checks: int = 0  # single checks deleted for being older than the retention setting
 
 
 class DuplicateLiveHost(ValueError):
@@ -477,7 +496,7 @@ class UnsupportedDatabase(CannotOpenDatabase):
 
 
 class _Unchanged:
-    """update_device's default for parent_id: leave the declared link as it is."""
+    """update_device's default for parent_id, inventory and group: leave it as it is."""
 
 
 UNCHANGED = _Unchanged()
@@ -498,7 +517,10 @@ def utc_now() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat()
 
 
-class Store:
+class Store(AccountsMixin, AlertsMixin):
+    # For the mixins, which catch a broken constraint without importing sqlite3.
+    _integrity_error = sqlite3.IntegrityError
+
     def __init__(self, conn: sqlite3.Connection) -> None:
         self._conn = conn
         self._conn.row_factory = sqlite3.Row
@@ -535,11 +557,17 @@ class Store:
     def close(self) -> None:
         self._conn.close()
 
-    def add_device(self, name: str, host: str, *, now: str | None = None) -> Device:
+    def add_device(
+        self, name: str, host: str, *, inventory: Inventory | None = None, group: str | int | None = None,
+        now: str | None = None,
+    ) -> Device:
+        """A new live device. inventory and group (an id, or a name that is made if new) are
+        optional (plan section 39). Everything is saved, or nothing."""
         clean_name = validate_name(name)
         clean_host = validate_host(host)
         stamp = _timestamp(now)
         with self._write(host=clean_host):
+            self._conn.execute("BEGIN IMMEDIATE")
             cur = self._conn.execute(
                 """
                 INSERT INTO devices (name, host, created_at, updated_at, deleted_at)
@@ -547,6 +575,10 @@ class Store:
                 """,
                 (clean_name, clean_host, stamp, stamp),
             )
+            if inventory is not None:
+                self._set_inventory(cur.lastrowid, inventory)
+            if group not in (None, ""):
+                self._set_group(cur.lastrowid, group, stamp)
         return self.get_device(cur.lastrowid)
 
     def update_device(
@@ -556,12 +588,15 @@ class Store:
         name: str | None = None,
         host: str | None = None,
         parent_id: str | int | None | _Unchanged = UNCHANGED,
+        inventory: Inventory | _Unchanged = UNCHANGED,
+        group: str | int | None | _Unchanged = UNCHANGED,
         now: str | None = None,
     ) -> Device:
         """Edit a live device. The id stays the same, so its history stays attached.
 
         parent_id is what the device connects through (plan section 20): a
-        device id, or None or "" for none. Everything is saved, or nothing.
+        device id, or None or "" for none. inventory and group are plan
+        section 39's. Everything is saved, or nothing.
         """
         device = self.get_device(device_id)
         if not device.is_live:
@@ -582,7 +617,118 @@ class Store:
             )
             if not isinstance(parent, _Unchanged):
                 self._set_link(device_id, clean_name, parent)
+            if not isinstance(inventory, _Unchanged):
+                self._set_inventory(device_id, inventory)
+            if not isinstance(group, _Unchanged):
+                self._set_group(device_id, group, stamp)
         return self.get_device(device_id)
+
+    def _set_inventory(self, device_id: int, inventory: Inventory) -> None:
+        self._conn.execute(
+            """
+            UPDATE devices SET kind = ?, vendor = ?, model = ?, location = ?, notes = ?, mac = ?, paused = ?,
+                               interval_s = ?, check_kind = ?, check_port = ?, alerts_muted = ?
+            WHERE id = ?
+            """,
+            (inventory.kind, inventory.vendor, inventory.model, inventory.location, inventory.notes, inventory.mac,
+             int(inventory.paused), inventory.interval_s, inventory.check_kind, inventory.check_port,
+             int(inventory.alerts_muted), device_id),
+        )
+        self._conn.execute("DELETE FROM device_tags WHERE device_id = ?", (device_id,))
+        self._conn.executemany(
+            "INSERT INTO device_tags (device_id, tag) VALUES (?, ?)", [(device_id, tag) for tag in inventory.tags]
+        )
+
+    def _set_group(self, device_id: int, group: str | int | None, stamp: str) -> None:
+        """Put a device in a group by id, or by name, making the group if it is new. None or "" takes it out."""
+        group_id = None
+        if isinstance(group, int) or (isinstance(group, str) and group.strip().isdigit()):
+            group_id = int(group)
+            if not self._conn.execute("SELECT 1 FROM device_groups WHERE id = ?", (group_id,)).fetchone():
+                raise ValidationError("that group no longer exists; choose another")
+        elif group not in (None, ""):
+            name = validate_group_name(group)
+            row = self._conn.execute("SELECT id FROM device_groups WHERE name = ? COLLATE NOCASE", (name,)).fetchone()
+            group_id = row["id"] if row else self._conn.execute(
+                "INSERT INTO device_groups (name, created_at) VALUES (?, ?)", (name, stamp)
+            ).lastrowid
+        self._conn.execute("UPDATE devices SET group_id = ? WHERE id = ?", (group_id, device_id))
+
+    def set_paused(self, device_id: int, paused: bool, *, now: str | None = None) -> Device:
+        """Pause or resume checks of a live device. A paused device is not checked and never alerts."""
+        device = self.get_device(device_id)
+        if not device.is_live:
+            raise ValidationError("cannot change a deleted device")
+        with self._write():
+            self._conn.execute(
+                "UPDATE devices SET paused = ?, updated_at = ? WHERE id = ?", (int(paused), _timestamp(now), device_id)
+            )
+        return self.get_device(device_id)
+
+    # Groups and tags (plan section 39)
+
+    def groups(self) -> list[DeviceGroup]:
+        """Every group by name, with how many live devices it holds."""
+        rows = self._conn.execute(
+            """
+            SELECT g.id, g.name, count(d.id) AS devices FROM device_groups AS g
+            LEFT JOIN devices AS d ON d.group_id = g.id AND d.deleted_at IS NULL
+            GROUP BY g.id ORDER BY g.name COLLATE NOCASE
+            """
+        ).fetchall()
+        return [DeviceGroup(**dict(r)) for r in rows]
+
+    def add_group(self, name: str, *, now: str | None = None) -> DeviceGroup:
+        clean = validate_group_name(name)
+        try:
+            with self._write():
+                cur = self._conn.execute(
+                    "INSERT INTO device_groups (name, created_at) VALUES (?, ?)", (clean, _timestamp(now))
+                )
+        except sqlite3.IntegrityError as exc:
+            raise ValidationError(f"group name: a group called {clean} already exists") from exc
+        return DeviceGroup(cur.lastrowid, clean)
+
+    def rename_group(self, group_id: int, name: str) -> DeviceGroup:
+        clean = validate_group_name(name)
+        try:
+            with self._write():
+                found = self._conn.execute("UPDATE device_groups SET name = ? WHERE id = ?", (clean, group_id)).rowcount
+        except sqlite3.IntegrityError as exc:
+            raise ValidationError(f"group name: a group called {clean} already exists") from exc
+        if not found:
+            raise KeyError(f"group {group_id} not found")
+        return DeviceGroup(group_id, clean)
+
+    def delete_group(self, group_id: int) -> None:
+        """Delete a group. Its devices stay, in no group."""
+        with self._write():
+            self._conn.execute("UPDATE devices SET group_id = NULL WHERE group_id = ?", (group_id,))
+            found = self._conn.execute("DELETE FROM device_groups WHERE id = ?", (group_id,)).rowcount
+        if not found:
+            raise KeyError(f"group {group_id} not found")
+
+    def tags(self) -> list[tuple[str, int]]:
+        """(tag, live devices carrying it), by tag."""
+        rows = self._conn.execute(
+            """
+            SELECT t.tag, count(*) AS devices FROM device_tags AS t
+            JOIN devices AS d ON d.id = t.device_id AND d.deleted_at IS NULL
+            GROUP BY t.tag ORDER BY t.tag
+            """
+        ).fetchall()
+        return [(row["tag"], row["devices"]) for row in rows]
+
+    def _tags(self, device_id: int | None = None) -> dict[int, tuple[str, ...]]:
+        """Each device's tags in order, for one device or for all of them, in one query."""
+        rows = self._conn.execute(
+            "SELECT device_id, tag FROM device_tags WHERE device_id = coalesce(?, device_id) ORDER BY device_id, tag",
+            (device_id,),
+        ).fetchall()
+        found: dict[int, list[str]] = {}
+        for row in rows:
+            found.setdefault(row["device_id"], []).append(row["tag"])
+        return {device: tuple(tags) for device, tags in found.items()}
 
     def _set_link(self, device_id: int, name: str, parent_id: int | None) -> None:
         if parent_id is None:
@@ -641,16 +787,57 @@ class Store:
             )
         return self.get_device(device_id)
 
+    def deleted_devices(self) -> list[Device]:
+        """Deleted devices, the most recently deleted first (plan section 39)."""
+        rows = self._conn.execute(
+            "SELECT * FROM devices WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC, id DESC"
+        ).fetchall()
+        tags = self._tags()
+        return [_device_from_row(r, tags.get(r["id"], ())) for r in rows]
+
+    def count_deleted_devices(self) -> int:
+        return self._conn.execute("SELECT count(*) FROM devices WHERE deleted_at IS NOT NULL").fetchone()[0]
+
+    def restore_device(self, device_id: int, *, now: str | None = None) -> Device:
+        """Bring a deleted device back, with its history. Raises DuplicateLiveHost when a
+        live device already has its host: the two would be checked twice."""
+        device = self.get_device(device_id)
+        if device.is_live:
+            return device
+        with self._write(host=device.host):
+            self._conn.execute(
+                "UPDATE devices SET deleted_at = NULL, updated_at = ? WHERE id = ?", (_timestamp(now), device_id)
+            )
+        return self.get_device(device_id)
+
+    def purge_device(self, device_id: int) -> Device:
+        """Erase a deleted device and everything kept about it, for good. Refused for a live device."""
+        device = self.get_device(device_id)
+        if device.is_live:
+            raise ValidationError("delete the device first; only a deleted device can be erased")
+        with self._write():
+            for table in ("check_results", "check_rollups_hourly", "device_events"):
+                self._conn.execute(f"DELETE FROM {table} WHERE device_id = ?", (device_id,))
+            self._conn.execute("DELETE FROM device_links WHERE device_id = ? OR parent_id = ?", (device_id, device_id))
+            self._conn.execute(
+                "UPDATE discovered_hosts SET state = 'ignored', device_id = NULL WHERE device_id = ?", (device_id,)
+            )
+            self._conn.execute("DELETE FROM devices WHERE id = ?", (device_id,))
+        return device
+
     # Discovery (plan section 21)
 
-    def record_sweep(self, found: list[FoundHost], *, now: str | None = None) -> None:
+    def record_sweep(self, found: list[FoundHost], *, now: str | None = None) -> list[DiscoveredHost]:
         """Add or update each host a sweep found. A host is never listed twice, and its state is kept.
 
         Identity is the MAC address. A host seen without one matches the
         newest row at its address; a host seen with one also claims the row
         it had at its address before its MAC address was known.
+
+        Returns the hosts never seen before (plan section 41: a scheduled sweep alerts on them).
         """
         stamp = _timestamp(now)
+        new_ids: list[int] = []
         with self._write():
             for host in found:
                 row = None
@@ -666,13 +853,13 @@ class Store:
                         (str(host.address),),
                     ).fetchone()
                 if row is None:
-                    self._conn.execute(
+                    new_ids.append(self._conn.execute(
                         """
                         INSERT INTO discovered_hosts (address, mac, name, answers_ping, first_seen, last_seen)
                         VALUES (?, ?, ?, ?, ?, ?)
                         """,
                         (str(host.address), host.mac, host.name, int(host.answers_ping), stamp, stamp),
-                    )
+                    ).lastrowid)
                 else:
                     self._conn.execute(
                         """
@@ -683,6 +870,7 @@ class Store:
                         """,
                         (str(host.address), host.mac, host.name, int(host.answers_ping), stamp, row["id"]),
                     )
+        return [self.get_discovered(host_id) for host_id in new_ids]
 
     def discovered(self) -> list[DiscoveredHost]:
         """The review list, by address."""
@@ -702,9 +890,14 @@ class Store:
         existing = self._conn.execute(
             "SELECT * FROM devices WHERE host = ? COLLATE NOCASE AND deleted_at IS NULL", (str(host.address),)
         ).fetchone()
-        device = _device_from_row(existing) if existing else self.add_device(
-            host.suggested_name, str(host.address), now=now
-        )
+        if existing:
+            device = _device_from_row(existing)
+        else:
+            # The MAC address comes from Windows' neighbour table: a fact. The type
+            # is left unset; the page offers guess_kind's suggestion, as a guess.
+            device = self.add_device(
+                host.suggested_name, str(host.address), inventory=Inventory(mac=host.mac), now=now
+            )
         self._set_host_state(host_id, HostState.ACCEPTED, device.id)
         return device
 
@@ -729,13 +922,36 @@ class Store:
         ).fetchone()
         if row is None:
             raise KeyError(f"device {device_id} not found")
-        return _device_from_row(row)
+        return _device_from_row(row, self._tags(device_id).get(device_id, ()))
 
     def list_live_devices(self) -> list[Device]:
         rows = self._conn.execute(
             "SELECT * FROM devices WHERE deleted_at IS NULL ORDER BY name COLLATE NOCASE, id"
         ).fetchall()
-        return [_device_from_row(r) for r in rows]
+        tags = self._tags()
+        return [_device_from_row(r, tags.get(r["id"], ())) for r in rows]
+
+    def due_devices(self, tick: int = 0, base_s: int = 30) -> list[Device]:
+        """Live devices due a check on the check loop's tick-th round (plan section 40).
+
+        Not the paused ones. A device on the loop's own interval is due every
+        round; one on a longer interval every so many rounds, counted by the
+        loop and not by the clock, so a PC that slept or a clock that changed
+        never bunches checks up. A device never checked is due at once.
+        """
+        rows = self._conn.execute(
+            """
+            SELECT d.*, EXISTS (SELECT 1 FROM check_results WHERE device_id = d.id) AS checked
+            FROM devices AS d WHERE d.deleted_at IS NULL AND d.paused = 0
+            ORDER BY d.name COLLATE NOCASE, d.id
+            """
+        ).fetchall()
+        tags = self._tags()
+        return [
+            _device_from_row(row, tags.get(row["id"], ()))
+            for row in rows
+            if not row["checked"] or tick % max(1, row["interval_s"] // base_s) == 0
+        ]
 
     def insert_result(
         self,
@@ -765,6 +981,26 @@ class Store:
             "SELECT * FROM check_results WHERE id = ?", (cur.lastrowid,)
         ).fetchone()
         return _result_from_row(row)
+
+    def insert_results(self, results: list[tuple[int, PingResult]], *, now: str | None = None) -> list[int]:
+        """Store a round's checks in one transaction (plan section 40), each with its rollup
+        and any outage event. A device deleted while the round ran is left out. Returns the
+        ids of the devices whose check was stored."""
+        stamp = _timestamp(now)
+        stored: list[int] = []
+        with self._write():
+            self._conn.execute("BEGIN IMMEDIATE")
+            live = {row[0] for row in self._conn.execute("SELECT id FROM devices WHERE deleted_at IS NULL")}
+            for device_id, result in results:
+                if device_id not in live:
+                    continue
+                self._conn.execute(
+                    "INSERT INTO check_results (device_id, checked_at, success, rtt_ms, error) VALUES (?, ?, ?, ?, ?)",
+                    (device_id, stamp, 1 if result.success else 0, result.rtt_ms, result.error),
+                )
+                _record_outage_event(self._conn, device_id)
+                stored.append(device_id)
+        return stored
 
     def checks_since(self, device_id: int, since: str) -> list[CheckResult]:
         """A device's checks at or after since, oldest first (plan section 17).
@@ -896,6 +1132,23 @@ class Store:
         ).fetchall()
         return [_event_from_row(r) for r in rows]
 
+    def events_since(self, since: str) -> list[DeviceEvent]:
+        """Every live device's outage events at or after since, and for each the newest
+        one before it, so an outage already going on then is not lost (plan section 42)."""
+        stamp = _timestamp(since)
+        rows = self._conn.execute(
+            """
+            SELECT e.* FROM devices AS d JOIN device_events AS e ON e.device_id = d.id
+            WHERE d.deleted_at IS NULL AND (e.at >= :since OR e.id = (
+                SELECT id FROM device_events WHERE device_id = d.id AND at < :since
+                ORDER BY at DESC, id DESC LIMIT 1
+            ))
+            ORDER BY e.at, e.id
+            """,
+            {"since": stamp},
+        ).fetchall()
+        return [_event_from_row(r) for r in rows]
+
     def rollups_since(self, since_hour: str) -> list[HourlyRollup]:
         """Every live device's hourly rollups from since_hour ('YYYY-MM-DDTHH') on (plan section 26).
 
@@ -946,9 +1199,10 @@ class Store:
             ORDER BY d.name COLLATE NOCASE, d.id
             """
         ).fetchall()
+        tags = self._tags()
         return [
             DeviceStatus(
-                _device_from_row(row),
+                _device_from_row(row, tags.get(row["id"], ())),
                 None
                 if row["result_id"] is None
                 else CheckResult(
@@ -1198,9 +1452,62 @@ class Store:
         with self._write():
             traces = self._prune_traces()
             outside = self._prune_outside_checks()
+        checks = self.prune_checks()
+        now = datetime.now(UTC)
+        self.prune_accounts(now)
+        self.prune_alerts(now)
         self._conn.execute("PRAGMA optimize")  # first: what it writes goes into the checkpoint too
         busy, _, _ = self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
-        return Upkeep(traces=traces, outside_checks=outside, checkpointed=not busy)
+        return Upkeep(traces=traces, outside_checks=outside, checkpointed=not busy, checks=checks)
+
+    # Retention (plan section 42)
+
+    def raw_days(self) -> int:
+        """Days single checks are kept; 0 keeps them all."""
+        days = self.setting(RETENTION_KEY, DEFAULT_RAW_DAYS)
+        return days if days in RAW_DAYS_CHOICES else DEFAULT_RAW_DAYS
+
+    def save_raw_days(self, days: str | int) -> int:
+        text = str(days).strip()
+        if not text.isdigit() or int(text) not in RAW_DAYS_CHOICES:
+            raise ValidationError(f"retention must be one of {', '.join(map(str, RAW_DAYS_CHOICES))} days")
+        self.set_setting(RETENTION_KEY, int(text))
+        return int(text)
+
+    def prune_checks(self, now: datetime | None = None) -> int:
+        """Delete single checks older than the retention setting, a device at a time so no
+        transaction is long. Hourly totals and outage events stay, so charts past 24 hours,
+        availability and the outage log are unchanged. Returns how many went."""
+        days = self.raw_days()
+        if days == 0:
+            return 0
+        cutoff = ((now or datetime.now(UTC)) - timedelta(days=days)).astimezone(UTC).replace(microsecond=0).isoformat()
+        deleted = 0
+        for (device_id,) in self._conn.execute("SELECT id FROM devices").fetchall():
+            with self._write():
+                deleted += self._conn.execute(
+                    "DELETE FROM check_results WHERE device_id = ? AND checked_at < ?", (device_id, cutoff)
+                ).rowcount
+        return deleted
+
+    def last_up_at(self, device_id: int) -> str | None:
+        """When the device last answered: its newest successful check, or, when that check
+        has been pruned, the hour its hourly totals last show a success in."""
+        newest = self.last_success(device_id)
+        if newest is not None:
+            return newest.checked_at
+        row = self._conn.execute(
+            "SELECT max(hour_utc) AS hour FROM check_rollups_hourly WHERE device_id = ? AND successes > 0",
+            (device_id,),
+        ).fetchone()
+        return None if row["hour"] is None else f"{row['hour']}:00:00+00:00"
+
+    def counts(self) -> dict[str, int]:
+        """How many rows the largest tables hold, for the settings page."""
+        return {
+            table: self._conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
+            for table in ("check_results", "check_rollups_hourly", "device_events", "audit_log")
+        }
 
     @contextmanager
     def _write(self, *, host: str | None = None) -> Iterator[None]:
@@ -1350,7 +1657,7 @@ def _discovered_from_row(row: sqlite3.Row) -> DiscoveredHost:
     )
 
 
-def _device_from_row(row: sqlite3.Row) -> Device:
+def _device_from_row(row: sqlite3.Row, tags: tuple[str, ...] = ()) -> Device:
     return Device(
         id=row["id"],
         name=row["name"],
@@ -1358,6 +1665,19 @@ def _device_from_row(row: sqlite3.Row) -> Device:
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         deleted_at=row["deleted_at"],
+        kind=row["kind"],
+        group_id=row["group_id"],
+        vendor=row["vendor"],
+        model=row["model"],
+        location=row["location"],
+        notes=row["notes"],
+        mac=row["mac"],
+        paused=bool(row["paused"]),
+        interval_s=row["interval_s"],
+        check_kind=row["check_kind"],
+        check_port=row["check_port"],
+        alerts_muted=bool(row["alerts_muted"]),
+        tags=tags,
     )
 
 
